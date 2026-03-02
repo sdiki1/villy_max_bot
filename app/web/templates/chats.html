@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VillyPrint Admin Chats</title>
+  <link rel="stylesheet" href="/static/admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <strong>VillyPrint Admin</strong>
+      <span class="muted">Вошли как {{ admin_name }}</span>
+    </div>
+    <form method="post" action="/admin/logout">
+      <button type="submit" class="secondary">Выйти</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <h2>Диалоги</h2>
+      {% if sessions %}
+        <nav class="session-list">
+          {% for session in sessions %}
+            {% set unread = unread_counts.get(session.id, 0) %}
+            <a
+              href="/admin/chats?session_id={{ session.id }}"
+              class="session-item {% if selected_session and selected_session.id == session.id %}active{% endif %}"
+            >
+              <div class="session-main">
+                <strong>#{{ session.id }} · {{ session.user.full_name or session.user.first_name }}</strong>
+                <span class="muted">@{{ session.user.username or 'без username' }}</span>
+              </div>
+              <div class="session-meta">
+                {% if session.is_open %}
+                  <span class="badge open">Открыт</span>
+                {% else %}
+                  <span class="badge closed">Закрыт</span>
+                {% endif %}
+                {% if unread %}
+                  <span class="badge unread">{{ unread }}</span>
+                {% endif %}
+              </div>
+            </a>
+          {% endfor %}
+        </nav>
+      {% else %}
+        <p class="muted">Пока нет чатов поддержки.</p>
+      {% endif %}
+    </aside>
+
+    <section class="chat-panel">
+      {% if selected_session %}
+        <header class="chat-header">
+          <div>
+            <h2>Чат #{{ selected_session.id }}</h2>
+            <p class="muted">
+              Пользователь: {{ selected_session.user.full_name or selected_session.user.first_name }} ·
+              ID {{ selected_session.user.max_user_id }}
+            </p>
+          </div>
+          {% if selected_session.is_open %}
+            <button
+              id="close-chat-btn"
+              class="danger"
+              data-session-id="{{ selected_session.id }}"
+            >
+              Закрыть чат
+            </button>
+          {% endif %}
+        </header>
+
+        <div id="chat-messages" class="chat-messages" data-last-id="{{ messages[-1].id if messages else 0 }}">
+          {% if messages %}
+            {% for msg in messages %}
+              <article class="message {% if msg.sender_role == 'admin' %}message-admin{% elif msg.sender_role == 'bot' %}message-bot{% else %}message-user{% endif %}" data-message-id="{{ msg.id }}">
+                <div class="message-head">
+                  <span>
+                    {% if msg.sender_role == 'admin' %}
+                      Админ
+                    {% elif msg.sender_role == 'bot' %}
+                      Бот
+                    {% else %}
+                      Пользователь
+                    {% endif %}
+                  </span>
+                  <time datetime="{{ msg.created_at.isoformat() }}">{{ msg.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+                </div>
+                <p>{{ msg.text or '[пусто]' }}</p>
+                {% if msg.attachment_data %}
+                  <ul class="attachment-list">
+                    {% for att in msg.attachment_data %}
+                      <li>
+                        {% if att.url %}
+                          <a href="{{ att.url }}" target="_blank" rel="noopener">Вложение</a>
+                        {% elif att.filename %}
+                          {{ att.filename }}{% if att.size %} ({{ att.size }} байт){% endif %}
+                        {% else %}
+                          Вложение
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
+              </article>
+            {% endfor %}
+          {% else %}
+            <p class="muted">В этом чате пока нет сообщений.</p>
+          {% endif %}
+        </div>
+
+        <section class="template-panel">
+          <div class="template-panel-head">
+            <h3>Макеты сообщений</h3>
+            <button id="template-reset-btn" type="button" class="secondary">Новый</button>
+          </div>
+          <div id="template-list" class="template-list">
+            {% if templates %}
+              {% for tpl in templates %}
+                <article class="template-item" data-template-id="{{ tpl.id }}">
+                  <div class="template-item-head">
+                    <strong>{{ tpl.title }}</strong>
+                    <div class="template-item-actions">
+                      <button type="button" class="secondary template-edit-btn" data-template-id="{{ tpl.id }}">Редактировать</button>
+                      <button
+                        type="button"
+                        class="template-send-btn"
+                        data-template-id="{{ tpl.id }}"
+                        {% if not selected_session %}disabled{% endif %}
+                      >
+                        Отправить
+                      </button>
+                    </div>
+                  </div>
+                  <p>{{ tpl.text }}</p>
+                </article>
+              {% endfor %}
+            {% else %}
+              <p class="muted">Шаблоны пока не добавлены.</p>
+            {% endif %}
+          </div>
+          <form id="template-form" class="template-form">
+            <input id="template-id" type="hidden" />
+            <label>
+              Название
+              <input id="template-title" type="text" maxlength="120" placeholder="Например: Приветствие" required />
+            </label>
+            <label>
+              Текст
+              <textarea id="template-text" rows="4" placeholder="Текст шаблона..." required></textarea>
+            </label>
+            <button id="template-save-btn" type="submit">Сохранить шаблон</button>
+          </form>
+        </section>
+
+        {% if not selected_session.is_open %}
+          <p class="muted">Чат закрыт, но вы можете продолжать писать пользователю из админ-панели.</p>
+        {% endif %}
+        <form id="send-form" class="send-form" data-session-id="{{ selected_session.id }}">
+          <textarea id="message-input" rows="3" placeholder="Введите сообщение пользователю..."></textarea>
+          <div class="send-actions">
+            <input id="file-input" type="file" />
+            <button type="submit">Отправить</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="empty-state">Выберите диалог слева.</div>
+      {% endif %}
+    </section>
+  </main>
+
+  <script>
+    window.__CHAT_SESSION_ID__ = {{ selected_session.id if selected_session else 'null' }};
+    window.__CHAT_IS_OPEN__ = {{ 'true' if selected_session and selected_session.is_open else 'false' }};
+    window.__MESSAGE_TEMPLATES__ = [
+      {% for tpl in templates %}
+        {
+          id: {{ tpl.id }},
+          title: {{ tpl.title|tojson }},
+          text: {{ tpl.text|tojson }}
+        }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+  </script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

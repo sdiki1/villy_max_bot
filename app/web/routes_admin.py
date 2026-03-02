@@ -1,0 +1,475 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
+
+from app.database import SessionFactory
+from app.models import MessageTemplate, SupportMessage, SupportSession
+from app.web.auth import authenticate_admin, is_admin_authenticated
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _redirect_to_login() -> RedirectResponse:
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+
+def _ensure_api_admin(request: Request) -> None:
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+
+@router.get("", include_in_schema=False)
+async def admin_root() -> RedirectResponse:
+    return RedirectResponse(url="/admin/chats", status_code=303)
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if is_admin_authenticated(request):
+        return RedirectResponse(url="/admin/chats", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": None},
+    )
+
+
+@router.post("/login", response_class=HTMLResponse)
+async def login_submit(
+    request: Request,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+):
+    if authenticate_admin(username=username, password=password):
+        request.session["admin_logged_in"] = True
+        request.session["admin_name"] = username
+        return RedirectResponse(url="/admin/chats", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": "Неверный логин или пароль"},
+        status_code=401,
+    )
+
+
+@router.post("/logout")
+async def logout(request: Request) -> RedirectResponse:
+    request.session.clear()
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+
+@router.get("/chats", response_class=HTMLResponse)
+async def chats_page(
+    request: Request,
+    session_id: int | None = None,
+):
+    if not is_admin_authenticated(request):
+        return _redirect_to_login()
+
+    async with SessionFactory() as db:
+        sessions = (
+            await db.scalars(
+                select(SupportSession)
+                .options(selectinload(SupportSession.user))
+                .order_by(SupportSession.is_open.desc(), SupportSession.created_at.desc())
+            )
+        ).all()
+
+        unread_rows = await db.execute(
+            select(SupportMessage.session_id, func.count(SupportMessage.id))
+            .where(
+                SupportMessage.sender_role == "user",
+                SupportMessage.is_read.is_(False),
+            )
+            .group_by(SupportMessage.session_id)
+        )
+        unread_counts = {row[0]: row[1] for row in unread_rows.all()}
+
+        selected_session: SupportSession | None = None
+        messages: list[SupportMessage] = []
+        message_templates = (
+            await db.scalars(
+                select(MessageTemplate).order_by(
+                    MessageTemplate.updated_at.desc(),
+                    MessageTemplate.id.desc(),
+                )
+            )
+        ).all()
+        if sessions:
+            selected_id = session_id or sessions[0].id
+            selected_session = await db.scalar(
+                select(SupportSession)
+                .options(
+                    selectinload(SupportSession.user),
+                )
+                .where(SupportSession.id == selected_id)
+            )
+            if selected_session is None:
+                selected_session = sessions[0]
+
+            if selected_session:
+                messages = (
+                    await db.scalars(
+                        select(SupportMessage)
+                        .join(
+                            SupportSession,
+                            SupportMessage.session_id == SupportSession.id,
+                        )
+                        .where(SupportSession.user_id == selected_session.user_id)
+                        .order_by(SupportMessage.id.asc())
+                    )
+                ).all()
+
+                unread_messages = [
+                    msg for msg in messages if msg.sender_role == "user" and not msg.is_read
+                ]
+                if unread_messages:
+                    for msg in unread_messages:
+                        msg.is_read = True
+                    await db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="chats.html",
+        context={
+            "admin_name": request.session.get("admin_name") or "admin",
+            "sessions": sessions,
+            "selected_session": selected_session,
+            "messages": messages,
+            "unread_counts": unread_counts,
+            "templates": message_templates,
+        },
+    )
+
+
+@router.get("/api/chats/{session_id}/messages")
+async def api_get_messages(
+    request: Request,
+    session_id: int,
+    after_id: int = 0,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        support_session = await db.scalar(
+            select(SupportSession).where(SupportSession.id == session_id)
+        )
+        if not support_session:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        messages = (
+            await db.scalars(
+                select(SupportMessage)
+                .join(
+                    SupportSession,
+                    SupportMessage.session_id == SupportSession.id,
+                )
+                .where(
+                    SupportSession.user_id == support_session.user_id,
+                    SupportMessage.id > after_id,
+                )
+                .order_by(SupportMessage.id.asc())
+            )
+        ).all()
+
+        updated = False
+        for message in messages:
+            if message.sender_role == "user" and not message.is_read:
+                message.is_read = True
+                updated = True
+
+        if updated:
+            await db.commit()
+
+    return JSONResponse(
+        {
+            "messages": [
+                {
+                    "id": msg.id,
+                    "sender_role": msg.sender_role,
+                    "text": msg.text or "",
+                    "attachment_data": msg.attachment_data or [],
+                    "created_at": msg.created_at.isoformat(),
+                }
+                for msg in messages
+            ]
+        }
+    )
+
+
+@router.post("/api/chats/{session_id}/messages")
+async def api_send_message(
+    request: Request,
+    session_id: int,
+    text: Annotated[str | None, Form()] = None,
+    file: UploadFile | None = File(default=None),
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    clean_text = (text or "").strip()
+    file_bytes: bytes | None = None
+    if file is not None:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Файл пустой")
+
+    if not clean_text and not file_bytes:
+        raise HTTPException(status_code=400, detail="Пустое сообщение")
+
+    async with SessionFactory() as db:
+        support_session = await db.scalar(
+            select(SupportSession)
+            .options(selectinload(SupportSession.user))
+            .where(SupportSession.id == session_id)
+        )
+
+        if not support_session:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        bot_service = getattr(request.app.state, "bot_service", None)
+        if bot_service is None:
+            raise HTTPException(status_code=503, detail="Сервис бота не инициализирован")
+
+        try:
+            await bot_service.send_admin_message(
+                user_id=support_session.user.max_user_id,
+                chat_id=support_session.user.chat_id,
+                text=clean_text or None,
+                file_bytes=file_bytes,
+                file_name=file.filename if file is not None else None,
+                file_content_type=file.content_type if file is not None else None,
+                support_session_id=support_session.id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"Не удалось отправить сообщение в MAX: {exc}",
+            ) from exc
+
+        message = await db.scalar(
+            select(SupportMessage)
+            .where(
+                SupportMessage.session_id == support_session.id,
+                SupportMessage.sender_role == "admin",
+            )
+            .order_by(SupportMessage.id.desc())
+            .limit(1)
+        )
+        if message is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Сообщение отправлено, но не найдено в логе",
+            )
+
+    return JSONResponse(
+        {
+            "message": {
+                "id": message.id,
+                "sender_role": message.sender_role,
+                "text": message.text or "",
+                "attachment_data": message.attachment_data or [],
+                "created_at": message.created_at.isoformat(),
+            }
+        }
+    )
+
+
+@router.post("/api/chats/{session_id}/close")
+async def api_close_chat(
+    request: Request,
+    session_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        support_session = await db.get(SupportSession, session_id)
+        if not support_session:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        if support_session.is_open:
+            support_session.is_open = False
+            support_session.closed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+    return JSONResponse({"ok": True})
+
+
+@router.get("/api/templates")
+async def api_list_templates(request: Request) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        templates = (
+            await db.scalars(
+                select(MessageTemplate).order_by(
+                    MessageTemplate.updated_at.desc(),
+                    MessageTemplate.id.desc(),
+                )
+            )
+        ).all()
+
+    return JSONResponse(
+        {
+            "templates": [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "text": item.text,
+                    "created_at": item.created_at.isoformat(),
+                    "updated_at": item.updated_at.isoformat(),
+                }
+                for item in templates
+            ]
+        }
+    )
+
+
+@router.post("/api/templates")
+async def api_create_template(request: Request) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    payload = await request.json()
+    title = str(payload.get("title") or "").strip()
+    text = str(payload.get("text") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Название шаблона пустое")
+    if not text:
+        raise HTTPException(status_code=400, detail="Текст шаблона пустой")
+
+    async with SessionFactory() as db:
+        template = MessageTemplate(title=title, text=text)
+        db.add(template)
+        await db.commit()
+        await db.refresh(template)
+
+    return JSONResponse(
+        {
+            "template": {
+                "id": template.id,
+                "title": template.title,
+                "text": template.text,
+                "created_at": template.created_at.isoformat(),
+                "updated_at": template.updated_at.isoformat(),
+            }
+        }
+    )
+
+
+@router.put("/api/templates/{template_id}")
+async def api_update_template(
+    request: Request,
+    template_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    payload = await request.json()
+    title = str(payload.get("title") or "").strip()
+    text = str(payload.get("text") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Название шаблона пустое")
+    if not text:
+        raise HTTPException(status_code=400, detail="Текст шаблона пустой")
+
+    async with SessionFactory() as db:
+        template = await db.get(MessageTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Шаблон не найден")
+
+        template.title = title
+        template.text = text
+        await db.commit()
+        await db.refresh(template)
+
+    return JSONResponse(
+        {
+            "template": {
+                "id": template.id,
+                "title": template.title,
+                "text": template.text,
+                "created_at": template.created_at.isoformat(),
+                "updated_at": template.updated_at.isoformat(),
+            }
+        }
+    )
+
+
+@router.post("/api/chats/{session_id}/templates/{template_id}/send")
+async def api_send_template_to_chat(
+    request: Request,
+    session_id: int,
+    template_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        support_session = await db.scalar(
+            select(SupportSession)
+            .options(selectinload(SupportSession.user))
+            .where(SupportSession.id == session_id)
+        )
+        if support_session is None:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        template = await db.get(MessageTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Шаблон не найден")
+
+        bot_service = getattr(request.app.state, "bot_service", None)
+        if bot_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Сервис бота не инициализирован",
+            )
+
+        try:
+            await bot_service.send_admin_message(
+                user_id=support_session.user.max_user_id,
+                chat_id=support_session.user.chat_id,
+                text=template.text,
+                support_session_id=support_session.id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"Не удалось отправить шаблон: {exc}",
+            ) from exc
+
+        message = await db.scalar(
+            select(SupportMessage)
+            .where(
+                SupportMessage.session_id == support_session.id,
+                SupportMessage.sender_role == "admin",
+            )
+            .order_by(SupportMessage.id.desc())
+            .limit(1)
+        )
+        if message is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Шаблон отправлен, но сообщение не найдено в логе",
+            )
+
+    return JSONResponse(
+        {
+            "message": {
+                "id": message.id,
+                "sender_role": message.sender_role,
+                "text": message.text or "",
+                "attachment_data": message.attachment_data or [],
+                "created_at": message.created_at.isoformat(),
+            }
+        }
+    )

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VillyPrint Admin Login</title>
+  <link rel="stylesheet" href="/static/admin.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <h1>Админ-панель VillyPrint</h1>
+    <p>Войдите для работы с чатами поддержки.</p>
+
+    {% if error %}
+      <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/login" class="login-form">
+      <label>
+        Логин
+        <input type="text" name="username" required autocomplete="username" />
+      </label>
+      <label>
+        Пароль
+        <input type="password" name="password" required autocomplete="current-password" />
+      </label>
+      <button type="submit">Войти</button>
+    </form>
+  </main>
+</body>
+</html>
