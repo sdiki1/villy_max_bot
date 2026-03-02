@@ -32,6 +32,13 @@ class Settings(BaseSettings):
         alias="ADMIN_SESSION_SECRET",
     )
 
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    admin_url: str = Field(
+        default="http://localhost:8001/admin/chats",
+        alias="ADMIN_URL",
+    )
+
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
 

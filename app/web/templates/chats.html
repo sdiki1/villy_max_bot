@@ -39,7 +39,10 @@
                   <span class="badge closed">Закрыт</span>
                 {% endif %}
                 {% if unread %}
-                  <span class="badge unread">{{ unread }}</span>
+                  <span class="unread-indicator" title="Непрочитанных: {{ unread }}">
+                    <span class="unread-dot"></span>
+                    <span class="unread-count">{{ unread }}</span>
+                  </span>
                 {% endif %}
               </div>
             </a>

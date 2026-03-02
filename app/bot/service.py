@@ -7,6 +7,9 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from maxapi import Bot, Dispatcher
 from maxapi.context.base import BaseContext
@@ -93,10 +96,16 @@ class MaxBotService:
         session_factory: async_sessionmaker[AsyncSession],
         skip_updates: bool = True,
         welcome_image_path: str | None = None,
+        telegram_bot_token: str | None = None,
+        telegram_chat_id: str | None = None,
+        admin_url: str | None = None,
     ) -> None:
         self._token = token
         self._session_factory = session_factory
         self._skip_updates = skip_updates
+        self._telegram_bot_token = (telegram_bot_token or "").strip()
+        self._telegram_chat_id = (telegram_chat_id or "").strip()
+        self._admin_url = (admin_url or "").strip()
         if welcome_image_path:
             self._welcome_image_path = Path(welcome_image_path).expanduser()
         else:
@@ -364,6 +373,7 @@ class MaxBotService:
                 )
                 return
 
+            await self._notify_admin_about_user_message(event.message)
             await self._answer_and_log(
                 event.message,
                 SUPPORT_ACK_TEXT,
@@ -571,6 +581,9 @@ class MaxBotService:
                 return
 
             data = dict(await context.get_data())
+            order_id: int | None = None
+            order_product_type = ""
+            order_design_notes = design_notes
 
             async with self._session_factory() as db:
                 user = await self._upsert_user_from_message(db, event.message)
@@ -626,8 +639,16 @@ class MaxBotService:
                 user.full_name = full_name
                 user.source_channel = source_channel
                 await db.commit()
+                order_id = order.id
+                order_product_type = product_type
 
             await context.clear()
+            await self._notify_admin_about_order(
+                event.message,
+                order_id=order_id,
+                product_type=order_product_type,
+                design_notes=order_design_notes,
+            )
             await self._answer_and_log(
                 event.message,
                 ORDER_SUCCESS_TEXT,
@@ -681,6 +702,7 @@ class MaxBotService:
                     return
 
                 await context.set_state(SupportStates.active_chat)
+                await self._notify_admin_about_user_message(event.message)
                 await self._answer_and_log(
                     event.message,
                     SUPPORT_ACK_TEXT,
@@ -688,6 +710,9 @@ class MaxBotService:
                 )
                 return
 
+            incoming_attachments = self._serialize_attachments(event.message)
+            if text or incoming_attachments:
+                await self._notify_admin_about_user_message(event.message)
             await self._answer_and_log(
                 event.message,
                 UNKNOWN_MENU_TEXT,
@@ -1005,6 +1030,135 @@ class MaxBotService:
                 )
             )
             await db.commit()
+
+    async def _notify_admin_about_order(
+        self,
+        message: Message,
+        *,
+        order_id: int | None,
+        product_type: str,
+        design_notes: str,
+    ) -> None:
+        order_label = f"#{order_id}" if order_id is not None else "без номера"
+        safe_notes = design_notes.strip() or "не указаны"
+        if len(safe_notes) > 400:
+            safe_notes = f"{safe_notes[:397]}..."
+
+        await self._notify_admin_telegram(
+            user_name=self._display_name_for_message(message),
+            message_text=(
+                f"Заполнена заявка {order_label}. "
+                f"Товар: {product_type or 'не указан'}. "
+                f"Пожелания: {safe_notes}"
+            ),
+        )
+
+    async def _notify_admin_about_user_message(self, message: Message) -> None:
+        preview = self._message_preview_for_notification(message)
+        await self._notify_admin_telegram(
+            user_name=self._display_name_for_message(message),
+            message_text=preview,
+        )
+
+    async def _notify_admin_telegram(
+        self,
+        *,
+        user_name: str,
+        message_text: str,
+    ) -> None:
+        if not self._telegram_bot_token or not self._telegram_chat_id:
+            return
+
+        safe_message = (message_text or "").strip() or "[пустое сообщение]"
+        if len(safe_message) > 800:
+            safe_message = f"{safe_message[:797]}..."
+
+        lines = [
+            "Новое сообщение в МАХ!",
+            f"Пользователь: {user_name}",
+            f"Сообщение: {safe_message}",
+        ]
+
+        if self._admin_url:
+            lines.append("")
+            lines.append(
+                f"Прочитайте и дайте ответ вот здесь: {self._admin_url}"
+            )
+
+        text = "\n".join(lines)
+        api_url = (
+            f"https://api.telegram.org/bot{self._telegram_bot_token}/sendMessage"
+        )
+        payload = urlencode(
+            {
+                "chat_id": self._telegram_chat_id,
+                "text": text,
+            }
+        ).encode("utf-8")
+
+        request = Request(
+            api_url,
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        try:
+            await asyncio.to_thread(
+                self._send_telegram_request,
+                request,
+            )
+        except URLError as exc:
+            logger.warning(
+                "Не удалось отправить Telegram-уведомление: %s",
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Ошибка при отправке Telegram-уведомления: %s",
+                exc,
+            )
+
+    @staticmethod
+    def _send_telegram_request(request: Request) -> None:
+        with urlopen(request, timeout=10) as response:
+            response.read()
+
+    def _message_preview_for_notification(self, message: Message) -> str:
+        text = self._message_text(message)
+        if text:
+            return text
+
+        attachments = self._serialize_attachments(message)
+        if not attachments:
+            return "[пустое сообщение]"
+
+        details: list[str] = []
+        for item in attachments[:3]:
+            attachment_type = str(item.get("type") or "вложение")
+            filename = str(item.get("filename") or "").strip()
+            if filename:
+                details.append(f"{attachment_type}: {filename}")
+            else:
+                details.append(attachment_type)
+
+        suffix = "" if len(attachments) <= 3 else f" и еще {len(attachments) - 3}"
+        return f"[Вложение] {', '.join(details)}{suffix}"
+
+    @staticmethod
+    def _display_name_for_message(message: Message) -> str:
+        sender = message.sender
+        if sender is None:
+            return "Неизвестный пользователь"
+
+        full_name = " ".join(
+            part for part in [sender.first_name, sender.last_name] if part
+        ).strip()
+        if full_name:
+            return full_name
+        if sender.username:
+            return f"@{sender.username}"
+        return f"ID {sender.user_id}"
 
     @staticmethod
     def _message_text(message: Message) -> str:

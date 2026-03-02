@@ -26,6 +26,9 @@ async def lifespan(app: FastAPI):
         session_factory=SessionFactory,
         skip_updates=settings.max_skip_updates,
         welcome_image_path=settings.welcome_image_path,
+        telegram_bot_token=settings.telegram_bot_token,
+        telegram_chat_id=settings.telegram_chat_id,
+        admin_url=settings.admin_url,
     )
     app.state.bot_service = bot_service
 
