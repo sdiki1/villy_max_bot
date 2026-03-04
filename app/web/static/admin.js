@@ -460,18 +460,19 @@
         return;
       }
 
+      const formData = new FormData();
+      formData.append("text", text);
+      if (file) {
+        formData.append("file", file);
+      }
+
+      const submitBtn = sendForm.querySelector('button[type="submit"]');
       messageInput.disabled = true;
-      if (fileInput) {
-        fileInput.disabled = true;
+      if (submitBtn instanceof HTMLButtonElement) {
+        submitBtn.disabled = true;
       }
 
       try {
-        const formData = new FormData();
-        formData.append("text", text);
-        if (file) {
-          formData.append("file", file);
-        }
-
         const response = await fetch(`/admin/api/chats/${sessionId}/messages`, {
           method: "POST",
           body: formData,
@@ -494,8 +495,8 @@
         alert("Не удалось отправить сообщение");
       } finally {
         messageInput.disabled = false;
-        if (fileInput) {
-          fileInput.disabled = false;
+        if (submitBtn instanceof HTMLButtonElement) {
+          submitBtn.disabled = false;
         }
         messageInput.focus();
       }

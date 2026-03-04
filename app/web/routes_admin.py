@@ -218,7 +218,7 @@ async def chats_page(
 
 
 @router.get("/wb", response_class=HTMLResponse)
-async def wb_page(request: Request) -> HTMLResponse | RedirectResponse:
+async def wb_page(request: Request):
     if not is_admin_authenticated(request):
         return _redirect_to_login()
 

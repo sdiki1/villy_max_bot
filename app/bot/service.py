@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from maxapi import Bot, Dispatcher
 from maxapi.context.base import BaseContext
+from maxapi.enums.upload_type import UploadType
 from maxapi.filters.middleware import BaseMiddleware
 from maxapi.filters import F
 from maxapi.types import (
@@ -168,16 +169,18 @@ class MaxBotService:
         clean_text = (text or "").strip()
 
         if file_bytes:
+            safe_file_name = Path(file_name or "attachment").name.strip() or "attachment"
             attachments_for_send.append(
                 InputMediaBuffer(
                     buffer=file_bytes,
-                    filename=file_name or "attachment",
+                    filename=safe_file_name,
+                    type=UploadType.FILE,
                 )
             )
             attachment_data.append(
                 {
                     "type": "upload",
-                    "filename": file_name or "attachment",
+                    "filename": safe_file_name,
                     "size": len(file_bytes),
                     "content_type": file_content_type or "",
                 }
