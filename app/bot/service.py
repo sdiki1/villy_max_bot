@@ -38,7 +38,6 @@ from app.bot.constants import (
     FAQ_HEADER,
     FAQ_QUESTIONS,
     FULL_NAME_PROMPT,
-    IMAGE_LOW_QUALITY_PROMPT,
     IMAGE_PROMPT,
     IMAGE_RETRY_PROMPT,
     MUG_OPTIONS,
@@ -553,14 +552,6 @@ class MaxBotService:
             attachment = self._extract_primary_attachment(event.message)
             if not attachment:
                 await self._answer_and_log(event.message, IMAGE_RETRY_PROMPT)
-                return
-
-            size = self._safe_int(attachment.get("size"))
-            if size is not None and size < 1_000_000:
-                await self._answer_and_log(
-                    event.message,
-                    IMAGE_LOW_QUALITY_PROMPT,
-                )
                 return
 
             await context.update_data(image_attachment=attachment)
