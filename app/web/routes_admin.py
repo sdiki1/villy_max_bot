@@ -170,7 +170,6 @@ async def chats_page(
                 )
             )
         ).all()
-        wb_auto_reply_setting = await _get_or_create_wb_auto_reply_setting(db)
         if sessions:
             selected_id = session_id or sessions[0].id
             selected_session = await db.scalar(
@@ -214,6 +213,23 @@ async def chats_page(
             "messages": messages,
             "unread_counts": unread_counts,
             "templates": message_templates,
+        },
+    )
+
+
+@router.get("/wb", response_class=HTMLResponse)
+async def wb_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if not is_admin_authenticated(request):
+        return _redirect_to_login()
+
+    async with SessionFactory() as db:
+        wb_auto_reply_setting = await _get_or_create_wb_auto_reply_setting(db)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="wb.html",
+        context={
+            "admin_name": request.session.get("admin_name") or "admin",
             "wb_auto_reply": _serialize_wb_auto_reply_setting(wb_auto_reply_setting),
         },
     )

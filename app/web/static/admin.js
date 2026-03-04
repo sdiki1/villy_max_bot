@@ -1,4 +1,5 @@
 (function () {
+  const MOSCOW_TIME_ZONE = "Europe/Moscow";
   const sessionId = window.__CHAT_SESSION_ID__;
   const initialTemplates = Array.isArray(window.__MESSAGE_TEMPLATES__)
     ? window.__MESSAGE_TEMPLATES__
@@ -53,8 +54,27 @@
     if (Number.isNaN(date.getTime())) {
       return iso;
     }
-    return date.toLocaleString("ru-RU", {
+    const formatted = date.toLocaleString("ru-RU", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
       hour12: false,
+      timeZone: MOSCOW_TIME_ZONE,
+    });
+    return `${formatted} МСК`;
+  }
+
+  function refreshRenderedTimes() {
+    const nodes = document.querySelectorAll("time[datetime]");
+    nodes.forEach((node) => {
+      const iso = node.getAttribute("datetime");
+      if (!iso) {
+        return;
+      }
+      node.textContent = formatDate(iso);
     });
   }
 
@@ -351,6 +371,7 @@
 
   renderTemplateList();
   hydrateWbForm(initialWbAutoReply);
+  refreshRenderedTimes();
 
   if (chatBox) {
     chatBox.scrollTop = chatBox.scrollHeight;

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VillyPrint Admin Wildberries</title>
+  <link rel="stylesheet" href="/static/admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <strong>VillyPrint Admin</strong>
+      <nav class="topbar-nav">
+        <a href="/admin/chats" class="topbar-link">Чаты</a>
+        <a href="/admin/wb" class="topbar-link active">WB автоответы</a>
+      </nav>
+      <span class="muted">Вошли как {{ admin_name }}</span>
+    </div>
+    <form method="post" action="/admin/logout">
+      <button type="submit" class="secondary">Выйти</button>
+    </form>
+  </header>
+
+  <main class="wb-page">
+    <section class="wb-auto-reply-panel">
+      <div class="template-panel-head">
+        <h3>Wildberries вопросы</h3>
+      </div>
+      <form id="wb-auto-reply-form" class="template-form">
+        <label class="checkbox-line">
+          <input id="wb-auto-reply-enabled" type="checkbox" />
+          Включить автоответы на вопросы Wildberries
+        </label>
+        <label>
+          Шаблон ответа
+          <textarea
+            id="wb-auto-reply-template"
+            rows="4"
+            placeholder="Здравствуйте! Благодарим за вопрос. {question_text}"
+          ></textarea>
+        </label>
+        <p class="muted">
+          Плейсхолдеры: <code>{question_text}</code>, <code>{product_name}</code>,
+          <code>{nm_id}</code>, <code>{question_id}</code>, <code>{brand_name}</code>.
+        </p>
+        <p id="wb-auto-reply-status" class="muted"></p>
+        <button id="wb-auto-reply-save-btn" type="submit">Сохранить настройки</button>
+      </form>
+    </section>
+
+    <section class="wb-auto-reply-panel">
+      <div class="template-panel-head">
+        <h3>Wildberries отзывы: AI</h3>
+      </div>
+      <form id="wb-feedback-ai-form" class="template-form">
+        <label class="checkbox-line">
+          <input id="wb-feedback-ai-enabled" type="checkbox" />
+          Включить AI-ответы на отзывы
+        </label>
+        <label>
+          AI промпт (Gemini)
+          <textarea
+            id="wb-feedback-ai-prompt"
+            rows="6"
+            placeholder="Ты менеджер поддержки..."
+          ></textarea>
+        </label>
+        <p class="muted">
+          Переменные для контекста AI: отзыв, оценка, плюсы/минусы и данные карточки товара.
+        </p>
+        <p id="wb-feedback-ai-status" class="muted"></p>
+        <button id="wb-feedback-ai-save-btn" type="submit">Сохранить AI настройки</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    window.__WB_AUTO_REPLY__ = {{ wb_auto_reply|tojson }};
+  </script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>
