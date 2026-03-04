@@ -5,6 +5,8 @@
 - FAQ с 16 вопросами
 - чат поддержки с пользователем
 - админ-панель с простым веб-чатом
+- автоответы на вопросы Wildberries по шаблону из админки
+- AI-ответы на отзывы Wildberries (Gemini)
 - Postgres
 - запуск через `docker-compose`
 
@@ -45,6 +47,8 @@
 - Просмотр всей истории общения пользователя с ботом
 - Отправка пользователю текста и файла/фото прямо из панели
 - Закрытие диалога
+- Настройка шаблона автоответа на вопросы Wildberries
+- Настройка AI-ответов на отзывы Wildberries
 
 ## Стек
 - Python 3.12
@@ -65,6 +69,8 @@ cp .env.example .env
 2. Заполните `.env`:
 - `MAX_BOT_TOKEN` (обязательно для запуска бота)
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`
+- `WB_API_TOKEN` (токен категории «Вопросы и отзывы» для автоответов WB)
+- `GEMINI_API_KEY` (ключ Gemini для AI-ответов на отзывы)
 
 3. Запустите:
 
@@ -73,8 +79,8 @@ docker compose up --build -d
 ```
 
 4. Проверьте:
-- Health: `http://localhost:8000/health`
-- Админка: `http://localhost:8000/admin/login`
+- Health: `http://localhost:8001/health`
+- Админка: `http://localhost:8001/admin/login`
 
 ## Важные переменные
 
@@ -82,6 +88,11 @@ docker compose up --build -d
 - `MAX_SKIP_UPDATES` — пропускать старые апдейты при старте
 - `WELCOME_IMAGE_PATH` — путь к приветственной картинке внутри контейнера (по умолчанию `welcome.jpeg`)
 - `DATABASE_URL` — строка подключения к Postgres
+- `WB_API_TOKEN` — API-токен Wildberries (категория «Вопросы и отзывы»)
+- `WB_AUTO_REPLY_POLL_INTERVAL` — частота опроса WB API (секунды)
+- `GEMINI_API_KEY` — ключ Google Gemini API
+- `GEMINI_MODEL` — модель Gemini (по умолчанию `gemini-2.0-flash`)
+- `GEMINI_TEMPERATURE` — температура генерации ответа
 
 ## Структура
 
@@ -89,5 +100,7 @@ docker compose up --build -d
 - `app/bot/service.py` — обработчики MAX-бота, FSM, сохранение заказов/чатов
 - `app/models.py` — SQLAlchemy модели
 - `app/web/routes_admin.py` — роуты админ-панели и API чатов
+- `app/wb/auto_reply_worker.py` — воркер автоответов на вопросы Wildberries
+- `app/wb/gemini_client.py` — клиент Gemini для генерации ответов на отзывы
 - `app/web/templates/` — HTML шаблоны
 - `app/web/static/` — CSS/JS админки

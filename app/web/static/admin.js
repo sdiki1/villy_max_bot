@@ -3,6 +3,15 @@
   const initialTemplates = Array.isArray(window.__MESSAGE_TEMPLATES__)
     ? window.__MESSAGE_TEMPLATES__
     : [];
+  const initialWbAutoReply = window.__WB_AUTO_REPLY__ && typeof window.__WB_AUTO_REPLY__ === "object"
+    ? window.__WB_AUTO_REPLY__
+    : {
+      is_enabled: false,
+      answer_template: "",
+      feedback_ai_enabled: false,
+      feedback_ai_prompt: "",
+      updated_at: "",
+    };
   const chatBox = document.getElementById("chat-messages");
   const sendForm = document.getElementById("send-form");
   const messageInput = document.getElementById("message-input");
@@ -14,11 +23,19 @@
   const templateIdInput = document.getElementById("template-id");
   const templateTitleInput = document.getElementById("template-title");
   const templateTextInput = document.getElementById("template-text");
+  const wbAutoReplyForm = document.getElementById("wb-auto-reply-form");
+  const wbAutoReplyEnabledInput = document.getElementById("wb-auto-reply-enabled");
+  const wbAutoReplyTemplateInput = document.getElementById("wb-auto-reply-template");
+  const wbAutoReplyStatus = document.getElementById("wb-auto-reply-status");
+  const wbFeedbackAiForm = document.getElementById("wb-feedback-ai-form");
+  const wbFeedbackAiEnabledInput = document.getElementById("wb-feedback-ai-enabled");
+  const wbFeedbackAiPromptInput = document.getElementById("wb-feedback-ai-prompt");
+  const wbFeedbackAiStatus = document.getElementById("wb-feedback-ai-status");
 
   let lastId = Number(chatBox?.dataset.lastId || 0);
   let templates = [...initialTemplates];
 
-  if (!sessionId && !templateForm) {
+  if (!sessionId && !templateForm && !wbAutoReplyForm && !wbFeedbackAiForm) {
     return;
   }
 
@@ -221,7 +238,119 @@
     }
   }
 
+  function updateWbStatus(settings) {
+    if (!wbAutoReplyStatus) {
+      return;
+    }
+
+    const enabled = Boolean(settings && settings.is_enabled);
+    const updatedAt = settings && settings.updated_at
+      ? formatDate(settings.updated_at)
+      : "";
+
+    wbAutoReplyStatus.textContent = enabled
+      ? `Автоответы включены${updatedAt ? ` · обновлено ${updatedAt}` : ""}`
+      : `Автоответы выключены${updatedAt ? ` · обновлено ${updatedAt}` : ""}`;
+  }
+
+  function updateWbFeedbackAiStatus(settings) {
+    if (!wbFeedbackAiStatus) {
+      return;
+    }
+
+    const enabled = Boolean(settings && settings.feedback_ai_enabled);
+    const updatedAt = settings && settings.updated_at
+      ? formatDate(settings.updated_at)
+      : "";
+
+    wbFeedbackAiStatus.textContent = enabled
+      ? `AI-ответы включены${updatedAt ? ` · обновлено ${updatedAt}` : ""}`
+      : `AI-ответы выключены${updatedAt ? ` · обновлено ${updatedAt}` : ""}`;
+  }
+
+  function hydrateWbForm(settings) {
+    if (!wbAutoReplyEnabledInput || !wbAutoReplyTemplateInput) {
+      return;
+    }
+    wbAutoReplyEnabledInput.checked = Boolean(settings && settings.is_enabled);
+    wbAutoReplyTemplateInput.value = String(settings?.answer_template || "");
+    updateWbStatus(settings || {});
+
+    if (wbFeedbackAiEnabledInput) {
+      wbFeedbackAiEnabledInput.checked = Boolean(settings && settings.feedback_ai_enabled);
+    }
+    if (wbFeedbackAiPromptInput) {
+      wbFeedbackAiPromptInput.value = String(settings?.feedback_ai_prompt || "");
+    }
+    updateWbFeedbackAiStatus(settings || {});
+  }
+
+  async function saveWbAutoReplySettings(event) {
+    event.preventDefault();
+    if (!wbAutoReplyEnabledInput || !wbAutoReplyTemplateInput) {
+      return;
+    }
+
+    const payload = {
+      is_enabled: wbAutoReplyEnabledInput.checked,
+      answer_template: wbAutoReplyTemplateInput.value.trim(),
+    };
+
+    const response = await fetch("/admin/api/wb/auto-reply", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(body.detail || "Не удалось сохранить настройки WB");
+      return;
+    }
+
+    if (body.settings) {
+      hydrateWbForm(body.settings);
+    } else {
+      updateWbStatus(payload);
+    }
+  }
+
+  async function saveWbFeedbackAiSettings(event) {
+    event.preventDefault();
+    if (!wbFeedbackAiEnabledInput || !wbFeedbackAiPromptInput) {
+      return;
+    }
+
+    const payload = {
+      feedback_ai_enabled: wbFeedbackAiEnabledInput.checked,
+      feedback_ai_prompt: wbFeedbackAiPromptInput.value.trim(),
+    };
+
+    const response = await fetch("/admin/api/wb/auto-reply", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(body.detail || "Не удалось сохранить AI-настройки отзывов");
+      return;
+    }
+
+    if (body.settings) {
+      hydrateWbForm(body.settings);
+    } else {
+      updateWbFeedbackAiStatus(payload);
+    }
+  }
+
   renderTemplateList();
+  hydrateWbForm(initialWbAutoReply);
 
   if (chatBox) {
     chatBox.scrollTop = chatBox.scrollHeight;
@@ -277,6 +406,26 @@
         } catch (err) {
           alert("Ошибка отправки шаблона");
         }
+      }
+    });
+  }
+
+  if (wbAutoReplyForm) {
+    wbAutoReplyForm.addEventListener("submit", async (event) => {
+      try {
+        await saveWbAutoReplySettings(event);
+      } catch (err) {
+        alert("Ошибка сохранения автоответа WB");
+      }
+    });
+  }
+
+  if (wbFeedbackAiForm) {
+    wbFeedbackAiForm.addEventListener("submit", async (event) => {
+      try {
+        await saveWbFeedbackAiSettings(event);
+      } catch (err) {
+        alert("Ошибка сохранения AI-настроек отзывов");
       }
     });
   }

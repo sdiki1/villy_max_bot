@@ -140,3 +140,21 @@ class MessageTemplate(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WbAutoReplySetting(TimestampMixin, Base):
+    __tablename__ = "wb_auto_reply_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    answer_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    feedback_ai_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    feedback_ai_prompt: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )

@@ -269,6 +269,33 @@ body {
   gap: 6px;
 }
 
+.wb-auto-reply-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.checkbox-line {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-line input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.template-form code {
+  background: #eef2f7;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 .send-form {
   display: grid;
   grid-template-columns: 1fr 220px;

@@ -39,6 +39,15 @@ class Settings(BaseSettings):
         alias="ADMIN_URL",
     )
 
+    wb_api_token: str = Field(default="", alias="WB_API_TOKEN")
+    wb_auto_reply_poll_interval: int = Field(
+        default=30,
+        alias="WB_AUTO_REPLY_POLL_INTERVAL",
+    )
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_temperature: float = Field(default=0.4, alias="GEMINI_TEMPERATURE")
+
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
 

@@ -157,6 +157,57 @@
           </form>
         </section>
 
+        <section class="wb-auto-reply-panel">
+          <div class="template-panel-head">
+            <h3>Wildberries автоответы</h3>
+          </div>
+          <form id="wb-auto-reply-form" class="template-form">
+            <label class="checkbox-line">
+              <input id="wb-auto-reply-enabled" type="checkbox" />
+              Включить автоответы на вопросы Wildberries
+            </label>
+            <label>
+              Шаблон ответа
+              <textarea
+                id="wb-auto-reply-template"
+                rows="4"
+                placeholder="Здравствуйте! Благодарим за вопрос. {question_text}"
+              ></textarea>
+            </label>
+            <p class="muted">
+              Плейсхолдеры: <code>{question_text}</code>, <code>{product_name}</code>,
+              <code>{nm_id}</code>, <code>{question_id}</code>, <code>{brand_name}</code>.
+            </p>
+            <p id="wb-auto-reply-status" class="muted"></p>
+            <button id="wb-auto-reply-save-btn" type="submit">Сохранить настройки</button>
+          </form>
+        </section>
+
+        <section class="wb-auto-reply-panel">
+          <div class="template-panel-head">
+            <h3>Wildberries отзывы: AI</h3>
+          </div>
+          <form id="wb-feedback-ai-form" class="template-form">
+            <label class="checkbox-line">
+              <input id="wb-feedback-ai-enabled" type="checkbox" />
+              Включить AI-ответы на отзывы
+            </label>
+            <label>
+              AI промпт (Gemini)
+              <textarea
+                id="wb-feedback-ai-prompt"
+                rows="6"
+                placeholder="Ты менеджер поддержки..."
+              ></textarea>
+            </label>
+            <p class="muted">
+              Переменные для контекста AI: отзыв, оценка, плюсы/минусы и данные карточки товара.
+            </p>
+            <p id="wb-feedback-ai-status" class="muted"></p>
+            <button id="wb-feedback-ai-save-btn" type="submit">Сохранить AI настройки</button>
+          </form>
+        </section>
+
         {% if not selected_session.is_open %}
           <p class="muted">Чат закрыт, но вы можете продолжать писать пользователю из админ-панели.</p>
         {% endif %}
@@ -185,6 +236,7 @@
         }{% if not loop.last %},{% endif %}
       {% endfor %}
     ];
+    window.__WB_AUTO_REPLY__ = {{ wb_auto_reply|tojson }};
   </script>
   <script src="/static/admin.js"></script>
 </body>

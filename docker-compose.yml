@@ -28,5 +28,15 @@ services:
       - "8001:8001"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8001
 
+  wb-auto-reply:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    command: python -m app.wb.auto_reply_worker
+
 volumes:
   pg_data:

@@ -8,16 +8,33 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import SessionFactory
-from app.models import MessageTemplate, SupportMessage, SupportSession
+from app.models import (
+    MessageTemplate,
+    SupportMessage,
+    SupportSession,
+    WbAutoReplySetting,
+)
 from app.web.auth import authenticate_admin, is_admin_authenticated
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+_WB_SETTING_ID = 1
+_DEFAULT_FEEDBACK_AI_PROMPT = (
+    "Ты менеджер поддержки магазина VillyPrint на Wildberries.\n"
+    "Сформируй короткий, вежливый и естественный ответ на отзыв покупателя.\n"
+    "Пиши только на русском языке, без эмодзи, без шаблонных канцеляризмов.\n"
+    "Если отзыв положительный — поблагодари.\n"
+    "Если отзыв содержит проблему — извинись и предложи связаться с поддержкой для решения.\n"
+    "Не выдумывай факты, которых нет в отзыве.\n"
+    "Верни только текст ответа (2-5000 символов), без кавычек и без служебных комментариев."
+)
 
 
 def _redirect_to_login() -> RedirectResponse:
@@ -27,6 +44,51 @@ def _redirect_to_login() -> RedirectResponse:
 def _ensure_api_admin(request: Request) -> None:
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+
+def _serialize_wb_auto_reply_setting(
+    setting: WbAutoReplySetting,
+) -> dict[str, str | bool]:
+    return {
+        "is_enabled": setting.is_enabled,
+        "answer_template": setting.answer_template,
+        "feedback_ai_enabled": setting.feedback_ai_enabled,
+        "feedback_ai_prompt": setting.feedback_ai_prompt,
+        "updated_at": setting.updated_at.isoformat(),
+    }
+
+
+async def _get_or_create_wb_auto_reply_setting(
+    db: AsyncSession,
+) -> WbAutoReplySetting:
+    setting = await db.get(WbAutoReplySetting, _WB_SETTING_ID)
+    if setting is not None:
+        if not setting.feedback_ai_prompt:
+            setting.feedback_ai_prompt = _DEFAULT_FEEDBACK_AI_PROMPT
+            await db.commit()
+            await db.refresh(setting)
+        return setting
+
+    setting = WbAutoReplySetting(
+        id=_WB_SETTING_ID,
+        is_enabled=False,
+        answer_template="",
+        feedback_ai_enabled=False,
+        feedback_ai_prompt=_DEFAULT_FEEDBACK_AI_PROMPT,
+    )
+    db.add(setting)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        setting = await db.get(WbAutoReplySetting, _WB_SETTING_ID)
+        if setting is None:
+            raise
+        return setting
+
+    await db.refresh(setting)
+    return setting
 
 
 @router.get("", include_in_schema=False)
@@ -108,6 +170,7 @@ async def chats_page(
                 )
             )
         ).all()
+        wb_auto_reply_setting = await _get_or_create_wb_auto_reply_setting(db)
         if sessions:
             selected_id = session_id or sessions[0].id
             selected_session = await db.scalar(
@@ -151,6 +214,7 @@ async def chats_page(
             "messages": messages,
             "unread_counts": unread_counts,
             "templates": message_templates,
+            "wb_auto_reply": _serialize_wb_auto_reply_setting(wb_auto_reply_setting),
         },
     )
 
@@ -404,6 +468,81 @@ async def api_update_template(
             }
         }
     )
+
+
+@router.get("/api/wb/auto-reply")
+async def api_get_wb_auto_reply_settings(request: Request) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        setting = await _get_or_create_wb_auto_reply_setting(db)
+
+    return JSONResponse({"settings": _serialize_wb_auto_reply_setting(setting)})
+
+
+@router.put("/api/wb/auto-reply")
+async def api_update_wb_auto_reply_settings(request: Request) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    payload = await request.json()
+    raw_is_enabled = payload.get("is_enabled")
+    raw_answer_template = payload.get("answer_template")
+    raw_feedback_ai_enabled = payload.get("feedback_ai_enabled")
+    raw_feedback_ai_prompt = payload.get("feedback_ai_prompt")
+
+    async with SessionFactory() as db:
+        setting = await _get_or_create_wb_auto_reply_setting(db)
+
+        is_enabled = setting.is_enabled if raw_is_enabled is None else bool(raw_is_enabled)
+        answer_template = (
+            setting.answer_template
+            if raw_answer_template is None
+            else str(raw_answer_template or "").strip()
+        )
+
+        feedback_ai_enabled = (
+            setting.feedback_ai_enabled
+            if raw_feedback_ai_enabled is None
+            else bool(raw_feedback_ai_enabled)
+        )
+        feedback_ai_prompt = (
+            setting.feedback_ai_prompt
+            if raw_feedback_ai_prompt is None
+            else str(raw_feedback_ai_prompt or "").strip()
+        )
+
+        if is_enabled and not answer_template:
+            raise HTTPException(
+                status_code=400,
+                detail="Чтобы включить автоответы на вопросы, заполните шаблон ответа",
+            )
+
+        if len(answer_template) > 5000:
+            raise HTTPException(
+                status_code=400,
+                detail="Шаблон ответа на вопросы слишком длинный (максимум 5000 символов)",
+            )
+
+        if feedback_ai_enabled and not feedback_ai_prompt:
+            raise HTTPException(
+                status_code=400,
+                detail="Чтобы включить AI-ответы на отзывы, заполните AI промпт",
+            )
+
+        if len(feedback_ai_prompt) > 8000:
+            raise HTTPException(
+                status_code=400,
+                detail="AI промпт для отзывов слишком длинный (максимум 8000 символов)",
+            )
+
+        setting.is_enabled = is_enabled
+        setting.answer_template = answer_template
+        setting.feedback_ai_enabled = feedback_ai_enabled
+        setting.feedback_ai_prompt = feedback_ai_prompt
+        await db.commit()
+        await db.refresh(setting)
+
+    return JSONResponse({"settings": _serialize_wb_auto_reply_setting(setting)})
 
 
 @router.post("/api/chats/{session_id}/templates/{template_id}/send")

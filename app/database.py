@@ -37,6 +37,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_single_support_session_per_user(conn)
+        await _ensure_wb_auto_reply_schema(conn)
 
 
 async def _ensure_single_support_session_per_user(conn) -> None:
@@ -105,6 +106,41 @@ async def _ensure_single_support_session_per_user(conn) -> None:
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_support_sessions_user_id
             ON support_sessions (user_id)
+            """
+        )
+    )
+
+
+async def _ensure_wb_auto_reply_schema(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE wb_auto_reply_settings
+            ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE wb_auto_reply_settings
+            ADD COLUMN IF NOT EXISTS answer_template TEXT NOT NULL DEFAULT ''
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE wb_auto_reply_settings
+            ADD COLUMN IF NOT EXISTS feedback_ai_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE wb_auto_reply_settings
+            ADD COLUMN IF NOT EXISTS feedback_ai_prompt TEXT NOT NULL DEFAULT ''
             """
         )
     )
