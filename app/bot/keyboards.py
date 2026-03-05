@@ -48,6 +48,10 @@ def product_keyboard() -> Attachment:
     return _kb([[MessageButton(text=title)] for title in PRODUCT_OPTIONS])
 
 
+def product_size_keyboard(options: list[str]) -> Attachment:
+    return _kb([[MessageButton(text=title)] for title in options])
+
+
 def mug_keyboard() -> Attachment:
     return _kb([[MessageButton(text=title)] for title in MUG_OPTIONS])
 

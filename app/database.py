@@ -37,6 +37,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_single_support_session_per_user(conn)
+        await _ensure_order_schema(conn)
         await _ensure_wb_auto_reply_schema(conn)
 
 
@@ -141,6 +142,17 @@ async def _ensure_wb_auto_reply_schema(conn) -> None:
             """
             ALTER TABLE wb_auto_reply_settings
             ADD COLUMN IF NOT EXISTS feedback_ai_prompt TEXT NOT NULL DEFAULT ''
+            """
+        )
+    )
+
+
+async def _ensure_order_schema(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE orders
+            ADD COLUMN IF NOT EXISTS product_size VARCHAR(100)
             """
         )
     )

@@ -6,6 +6,7 @@ class OrderStates(StatesGroup):
     waiting_full_name = State()
     waiting_product = State()
     waiting_mug_type = State()
+    waiting_product_size = State()
     waiting_source = State()
     waiting_image = State()
     waiting_design_notes = State()

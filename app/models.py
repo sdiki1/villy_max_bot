@@ -74,6 +74,7 @@ class Order(TimestampMixin, Base):
 
     product_type: Mapped[str] = mapped_column(String(100), nullable=False)
     mug_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    product_size: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_channel: Mapped[str] = mapped_column(String(100), nullable=False)
     design_notes: Mapped[str] = mapped_column(Text, nullable=False)
 

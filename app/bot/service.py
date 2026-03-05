@@ -45,8 +45,12 @@ from app.bot.constants import (
     MUG_PROMPT,
     ORDER_SUCCESS_TEXT,
     PHONE_PROMPT,
+    PRODUCT_IMAGE_PROMPTS,
+    PRODUCT_MUG,
     PRODUCT_OPTIONS,
     PRODUCT_PROMPT,
+    PRODUCT_SIZE_OPTIONS,
+    PRODUCT_SIZE_PROMPTS,
     SOURCE_OPTIONS,
     SOURCE_PROMPT,
     SUPPORT_ACK_TEXT,
@@ -61,6 +65,7 @@ from app.bot.keyboards import (
     mug_keyboard,
     phone_request_keyboard,
     product_keyboard,
+    product_size_keyboard,
     source_keyboard,
     support_keyboard,
 )
@@ -229,6 +234,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await self._close_support_for_message(event.message)
             await context.clear()
 
@@ -243,6 +249,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await context.clear()
             await context.set_state(OrderStates.waiting_phone)
 
@@ -250,9 +257,10 @@ class MaxBotService:
                 await self._upsert_user_from_message(db, event.message)
                 await db.commit()
 
-            await self._answer_and_log(
+            await self._send_order_step_message(
                 event.message,
-                PHONE_PROMPT,
+                context=context,
+                text=PHONE_PROMPT,
                 attachments=[phone_request_keyboard()],
             )
 
@@ -261,6 +269,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await context.clear()
 
             async with self._session_factory() as db:
@@ -292,8 +301,13 @@ class MaxBotService:
                     created = order.created_at.astimezone().strftime(
                         "%d.%m.%Y %H:%M"
                     )
+                    product_label = order.product_type
+                    if order.mug_type:
+                        product_label = f"{product_label} | {order.mug_type}"
+                    if order.product_size:
+                        product_label = f"{product_label} | {order.product_size}"
                     lines.append(
-                        f"• #{order.id} | {order.product_type} | "
+                        f"• #{order.id} | {product_label} | "
                         f"{self._status_ru(order.status)} | {created}"
                     )
                 text = "\n".join(lines)
@@ -309,6 +323,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await context.clear()
             await context.set_state(FAQStates.selecting_question)
             await self._answer_and_log(
@@ -322,6 +337,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await context.clear()
             await context.set_state(SupportStates.active_chat)
 
@@ -342,6 +358,7 @@ class MaxBotService:
             event: MessageCreated,
             context: BaseContext,
         ) -> None:
+            await self._delete_order_step_message(context)
             await context.clear()
             await self._answer_and_log(
                 event.message,
@@ -422,14 +439,18 @@ class MaxBotService:
         ) -> None:
             phone = self._extract_phone(event.message)
             if not phone:
-                await self._answer_and_log(
+                await self._send_order_step_message(
                     event.message,
-                    "Не удалось распознать номер. Введите его в формате +7 999 123 45 67 "
-                    "или используйте кнопку отправки контакта.",
+                    context=context,
+                    text=(
+                        "Не удалось распознать номер. Введите его в формате +7 999 123 45 67 "
+                        "или используйте кнопку отправки контакта."
+                    ),
                     attachments=[phone_request_keyboard()],
                 )
                 return
 
+            await self._delete_order_step_message(context)
             await context.update_data(phone=phone)
             await context.set_state(OrderStates.waiting_full_name)
 
@@ -463,9 +484,10 @@ class MaxBotService:
                     user.full_name = full_name
                 await db.commit()
 
-            await self._answer_and_log(
+            await self._send_order_step_message(
                 event.message,
-                PRODUCT_PROMPT,
+                context=context,
+                text=PRODUCT_PROMPT,
                 attachments=[product_keyboard()],
             )
 
@@ -476,28 +498,46 @@ class MaxBotService:
         ) -> None:
             product = self._message_text(event.message)
             if product not in PRODUCT_OPTIONS:
-                await self._answer_and_log(
+                await self._send_order_step_message(
                     event.message,
-                    "Выберите товар кнопкой ниже.",
+                    context=context,
+                    text="Выберите товар кнопкой ниже.",
                     attachments=[product_keyboard()],
                 )
                 return
 
-            await context.update_data(product_type=product)
+            await context.update_data(
+                product_type=product,
+                mug_type=None,
+                product_size=None,
+            )
 
-            if product == PRODUCT_OPTIONS[0]:
+            if product == PRODUCT_MUG:
                 await context.set_state(OrderStates.waiting_mug_type)
-                await self._answer_and_log(
+                await self._send_order_step_message(
                     event.message,
-                    MUG_PROMPT,
+                    context=context,
+                    text=MUG_PROMPT,
                     attachments=[mug_keyboard()],
                 )
             else:
-                await context.set_state(OrderStates.waiting_source)
-                await self._answer_and_log(
+                size_options = PRODUCT_SIZE_OPTIONS.get(product, [])
+                if not size_options:
+                    await context.set_state(OrderStates.waiting_source)
+                    await self._send_order_step_message(
+                        event.message,
+                        context=context,
+                        text=SOURCE_PROMPT,
+                        attachments=[source_keyboard()],
+                    )
+                    return
+
+                await context.set_state(OrderStates.waiting_product_size)
+                await self._send_order_step_message(
                     event.message,
-                    SOURCE_PROMPT,
-                    attachments=[source_keyboard()],
+                    context=context,
+                    text=PRODUCT_SIZE_PROMPTS.get(product, "Выберите размер товара:"),
+                    attachments=[product_size_keyboard(size_options)],
                 )
 
         @self.dp.message_created(OrderStates.waiting_mug_type)
@@ -507,18 +547,47 @@ class MaxBotService:
         ) -> None:
             mug_type = self._message_text(event.message)
             if mug_type not in MUG_OPTIONS:
-                await self._answer_and_log(
+                await self._send_order_step_message(
                     event.message,
-                    "Выберите тип кружки кнопкой ниже.",
+                    context=context,
+                    text="Выберите тип кружки кнопкой ниже.",
                     attachments=[mug_keyboard()],
                 )
                 return
 
-            await context.update_data(mug_type=mug_type)
+            await context.update_data(mug_type=mug_type, product_size=None)
             await context.set_state(OrderStates.waiting_source)
-            await self._answer_and_log(
+            await self._send_order_step_message(
                 event.message,
-                SOURCE_PROMPT,
+                context=context,
+                text=SOURCE_PROMPT,
+                attachments=[source_keyboard()],
+            )
+
+        @self.dp.message_created(OrderStates.waiting_product_size)
+        async def on_order_product_size(
+            event: MessageCreated,
+            context: BaseContext,
+        ) -> None:
+            selected_size = self._message_text(event.message)
+            data = dict(await context.get_data())
+            product_type = str(data.get("product_type") or "")
+            size_options = PRODUCT_SIZE_OPTIONS.get(product_type, [])
+            if selected_size not in size_options:
+                await self._send_order_step_message(
+                    event.message,
+                    context=context,
+                    text="Выберите размер кнопкой ниже.",
+                    attachments=[product_size_keyboard(size_options)],
+                )
+                return
+
+            await context.update_data(product_size=selected_size, mug_type=None)
+            await context.set_state(OrderStates.waiting_source)
+            await self._send_order_step_message(
+                event.message,
+                context=context,
+                text=SOURCE_PROMPT,
                 attachments=[source_keyboard()],
             )
 
@@ -529,15 +598,17 @@ class MaxBotService:
         ) -> None:
             source = self._message_text(event.message)
             if source not in SOURCE_OPTIONS:
-                await self._answer_and_log(
+                await self._send_order_step_message(
                     event.message,
-                    "Выберите вариант кнопкой ниже.",
+                    context=context,
+                    text="Выберите вариант кнопкой ниже.",
                     attachments=[source_keyboard()],
                 )
                 return
 
             await context.update_data(source_channel=source)
             await context.set_state(OrderStates.waiting_image)
+            await self._delete_order_step_message(context)
 
             async with self._session_factory() as db:
                 user = await self._upsert_user_from_message(db, event.message)
@@ -545,7 +616,10 @@ class MaxBotService:
                     user.source_channel = source
                 await db.commit()
 
-            await self._answer_and_log(event.message, IMAGE_PROMPT)
+            data = dict(await context.get_data())
+            product_type = str(data.get("product_type") or "")
+            image_prompt = PRODUCT_IMAGE_PROMPTS.get(product_type, IMAGE_PROMPT)
+            await self._answer_and_log(event.message, image_prompt)
 
         @self.dp.message_created(OrderStates.waiting_image)
         async def on_order_image(
@@ -578,6 +652,8 @@ class MaxBotService:
             order_id: int | None = None
             order_product_type = ""
             order_design_notes = design_notes
+            order_mug_type: str | None = None
+            order_product_size: str | None = None
 
             async with self._session_factory() as db:
                 user = await self._upsert_user_from_message(db, event.message)
@@ -595,6 +671,8 @@ class MaxBotService:
                 source_channel = str(data.get("source_channel") or "")
                 mug_type_raw = data.get("mug_type")
                 mug_type = str(mug_type_raw) if mug_type_raw else None
+                product_size_raw = data.get("product_size")
+                product_size = str(product_size_raw) if product_size_raw else None
                 image_data = data.get("image_attachment")
 
                 if not all([phone, full_name, product_type, source_channel]):
@@ -614,6 +692,7 @@ class MaxBotService:
                     full_name=full_name,
                     product_type=product_type,
                     mug_type=mug_type,
+                    product_size=product_size,
                     source_channel=source_channel,
                     design_notes=design_notes,
                     image_url=(image_data or {}).get("url")
@@ -635,12 +714,16 @@ class MaxBotService:
                 await db.commit()
                 order_id = order.id
                 order_product_type = product_type
+                order_mug_type = mug_type
+                order_product_size = product_size
 
             await context.clear()
             await self._notify_admin_about_order(
                 event.message,
                 order_id=order_id,
                 product_type=order_product_type,
+                mug_type=order_mug_type,
+                product_size=order_product_size,
                 design_notes=order_design_notes,
             )
             await self._answer_and_log(
@@ -920,6 +1003,54 @@ class MaxBotService:
             create_session_if_missing=True,
         )
 
+    async def _send_order_step_message(
+        self,
+        message: Message,
+        *,
+        context: BaseContext,
+        text: str | None = None,
+        attachments: list[Any] | None = None,
+    ) -> None:
+        await self._delete_order_step_message(context)
+        sent_message = await message.answer(text=text, attachments=attachments)
+        await context.update_data(
+            order_step_message_id=self._extract_sent_message_id(sent_message)
+        )
+        await self._log_support_message_from_message(
+            message=message,
+            sender_role="bot",
+            text=(text or "").strip() or None,
+            attachment_data=self._serialize_outgoing_attachments(attachments),
+            is_read=True,
+            create_session_if_missing=True,
+        )
+
+    async def _delete_order_step_message(self, context: BaseContext) -> None:
+        data = dict(await context.get_data())
+        message_id = str(data.get("order_step_message_id") or "").strip()
+        if not message_id:
+            return
+
+        if self.bot:
+            try:
+                await self.bot.delete_message(message_id=message_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Не удалось удалить предыдущее step-сообщение: %s",
+                    exc,
+                )
+
+        await context.update_data(order_step_message_id=None)
+
+    @staticmethod
+    def _extract_sent_message_id(sent_message: Any) -> str | None:
+        message = getattr(sent_message, "message", None)
+        body = getattr(message, "body", None)
+        message_id = getattr(body, "mid", None)
+        if not message_id:
+            return None
+        return str(message_id)
+
     async def _send_to_user_and_log(
         self,
         *,
@@ -1031,6 +1162,8 @@ class MaxBotService:
         *,
         order_id: int | None,
         product_type: str,
+        mug_type: str | None,
+        product_size: str | None,
         design_notes: str,
     ) -> None:
         order_label = f"#{order_id}" if order_id is not None else "без номера"
@@ -1038,11 +1171,18 @@ class MaxBotService:
         if len(safe_notes) > 400:
             safe_notes = f"{safe_notes[:397]}..."
 
+        product_parts: list[str] = [product_type or "не указан"]
+        if mug_type:
+            product_parts.append(mug_type)
+        if product_size:
+            product_parts.append(product_size)
+        product_label = " | ".join(product_parts)
+
         await self._notify_admin_telegram(
             user_name=self._display_name_for_message(message),
             message_text=(
                 f"Заполнена заявка {order_label}. "
-                f"Товар: {product_type or 'не указан'}. "
+                f"Товар: {product_label}. "
                 f"Пожелания: {safe_notes}"
             ),
         )
