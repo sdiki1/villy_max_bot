@@ -80,6 +80,36 @@ body {
   overflow-y: auto;
 }
 
+.sidebar-head {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sidebar-head h2 {
+  margin: 0;
+}
+
+.chat-filter-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.chat-filter-tab {
+  text-decoration: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.chat-filter-tab.active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
 .session-list {
   display: grid;
   gap: 10px;
@@ -177,6 +207,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -186,6 +218,24 @@ body {
 .chat-header h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rename-user-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rename-user-form input {
+  width: 240px;
+  max-width: 100%;
 }
 
 .chat-messages {
@@ -224,9 +274,22 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+  align-items: center;
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+.message-head-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.message-delete-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
 }
 
 .message p {
@@ -237,9 +300,37 @@ body {
 
 .attachment-list {
   margin: 8px 0 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
   color: var(--muted);
   font-size: 13px;
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-item {
+  display: grid;
+  gap: 4px;
+}
+
+.attachment-image-link {
+  display: inline-block;
+  width: min(280px, 100%);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #f7f9fc;
+}
+
+.attachment-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.attachment-meta {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .template-panel {
@@ -439,6 +530,18 @@ button.danger {
 
   .sidebar {
     max-height: 40vh;
+  }
+
+  .chat-header-actions {
+    width: 100%;
+  }
+
+  .rename-user-form {
+    width: 100%;
+  }
+
+  .rename-user-form input {
+    width: 100%;
   }
 
   .send-form {

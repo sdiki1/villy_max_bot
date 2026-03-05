@@ -37,6 +37,8 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_single_support_session_per_user(conn)
+        await _ensure_user_schema(conn)
+        await _ensure_support_message_schema(conn)
         await _ensure_order_schema(conn)
         await _ensure_wb_auto_reply_schema(conn)
 
@@ -153,6 +155,44 @@ async def _ensure_order_schema(conn) -> None:
             """
             ALTER TABLE orders
             ADD COLUMN IF NOT EXISTS product_size VARCHAR(100)
+            """
+        )
+    )
+
+
+async def _ensure_user_schema(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS admin_display_name VARCHAR(255)
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+
+
+async def _ensure_support_message_schema(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE support_messages
+            ADD COLUMN IF NOT EXISTS max_message_id VARCHAR(255)
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_support_messages_max_message_id
+            ON support_messages (max_message_id)
             """
         )
     )

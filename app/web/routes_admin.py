@@ -17,6 +17,7 @@ from app.models import (
     MessageTemplate,
     SupportMessage,
     SupportSession,
+    User,
     WbAutoReplySetting,
 )
 from app.web.auth import authenticate_admin, is_admin_authenticated
@@ -55,6 +56,17 @@ def _serialize_wb_auto_reply_setting(
         "feedback_ai_enabled": setting.feedback_ai_enabled,
         "feedback_ai_prompt": setting.feedback_ai_prompt,
         "updated_at": setting.updated_at.isoformat(),
+    }
+
+
+def _serialize_support_message(message: SupportMessage) -> dict[str, object]:
+    return {
+        "id": message.id,
+        "sender_role": message.sender_role,
+        "text": message.text or "",
+        "attachment_data": message.attachment_data or [],
+        "created_at": message.created_at.isoformat(),
+        "max_message_id": message.max_message_id or "",
     }
 
 
@@ -137,15 +149,18 @@ async def logout(request: Request) -> RedirectResponse:
 async def chats_page(
     request: Request,
     session_id: int | None = None,
+    archived: int = 0,
 ):
     if not is_admin_authenticated(request):
         return _redirect_to_login()
 
+    archived_view = bool(archived)
     async with SessionFactory() as db:
         sessions = (
             await db.scalars(
                 select(SupportSession)
                 .options(selectinload(SupportSession.user))
+                .where(SupportSession.user.has(User.is_archived.is_(archived_view)))
                 .order_by(SupportSession.is_open.desc(), SupportSession.created_at.desc())
             )
         ).all()
@@ -172,12 +187,9 @@ async def chats_page(
         ).all()
         if sessions:
             selected_id = session_id or sessions[0].id
-            selected_session = await db.scalar(
-                select(SupportSession)
-                .options(
-                    selectinload(SupportSession.user),
-                )
-                .where(SupportSession.id == selected_id)
+            selected_session = next(
+                (item for item in sessions if item.id == selected_id),
+                None,
             )
             if selected_session is None:
                 selected_session = sessions[0]
@@ -213,6 +225,7 @@ async def chats_page(
             "messages": messages,
             "unread_counts": unread_counts,
             "templates": message_templates,
+            "archived_view": archived_view,
         },
     )
 
@@ -277,13 +290,7 @@ async def api_get_messages(
     return JSONResponse(
         {
             "messages": [
-                {
-                    "id": msg.id,
-                    "sender_role": msg.sender_role,
-                    "text": msg.text or "",
-                    "attachment_data": msg.attachment_data or [],
-                    "created_at": msg.created_at.isoformat(),
-                }
+                _serialize_support_message(msg)
                 for msg in messages
             ]
         }
@@ -356,13 +363,7 @@ async def api_send_message(
 
     return JSONResponse(
         {
-            "message": {
-                "id": message.id,
-                "sender_role": message.sender_role,
-                "text": message.text or "",
-                "attachment_data": message.attachment_data or [],
-                "created_at": message.created_at.isoformat(),
-            }
+            "message": _serialize_support_message(message)
         }
     )
 
@@ -383,6 +384,117 @@ async def api_close_chat(
             support_session.is_open = False
             support_session.closed_at = datetime.now(timezone.utc)
             await db.commit()
+
+    return JSONResponse({"ok": True})
+
+
+@router.put("/api/chats/{session_id}/user")
+async def api_update_chat_user(
+    request: Request,
+    session_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+    payload = await request.json()
+    display_name = str(payload.get("display_name") or "").strip()
+
+    async with SessionFactory() as db:
+        support_session = await db.scalar(
+            select(SupportSession)
+            .options(selectinload(SupportSession.user))
+            .where(SupportSession.id == session_id)
+        )
+        if support_session is None:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        user = support_session.user
+        user.admin_display_name = display_name or None
+        await db.commit()
+        await db.refresh(user)
+
+    effective_name = user.admin_display_name or user.full_name or user.first_name
+    return JSONResponse(
+        {
+            "user": {
+                "id": user.id,
+                "display_name": effective_name,
+                "admin_display_name": user.admin_display_name or "",
+                "username": user.username or "",
+                "is_archived": user.is_archived,
+            }
+        }
+    )
+
+
+@router.put("/api/chats/{session_id}/archive")
+async def api_archive_chat_user(
+    request: Request,
+    session_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+    payload = await request.json()
+    raw_is_archived = payload.get("is_archived")
+    is_archived = True if raw_is_archived is None else bool(raw_is_archived)
+
+    async with SessionFactory() as db:
+        support_session = await db.scalar(
+            select(SupportSession)
+            .options(selectinload(SupportSession.user))
+            .where(SupportSession.id == session_id)
+        )
+        if support_session is None:
+            raise HTTPException(status_code=404, detail="Чат не найден")
+
+        user = support_session.user
+        user.is_archived = is_archived
+        if is_archived and support_session.is_open:
+            support_session.is_open = False
+            support_session.closed_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(user)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "user": {
+                "id": user.id,
+                "is_archived": user.is_archived,
+            },
+        }
+    )
+
+
+@router.delete("/api/messages/{message_id}")
+async def api_delete_message_for_all(
+    request: Request,
+    message_id: int,
+) -> JSONResponse:
+    _ensure_api_admin(request)
+
+    async with SessionFactory() as db:
+        message = await db.get(SupportMessage, message_id)
+        if message is None:
+            raise HTTPException(status_code=404, detail="Сообщение не найдено")
+
+        if not message.max_message_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Для этого сообщения удаление у всех недоступно",
+            )
+
+        bot_service = getattr(request.app.state, "bot_service", None)
+        if bot_service is None or not getattr(bot_service, "bot", None):
+            raise HTTPException(status_code=503, detail="Сервис бота не инициализирован")
+
+        try:
+            await bot_service.bot.delete_message(message_id=message.max_message_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"Не удалось удалить сообщение у всех: {exc}",
+            ) from exc
+
+        await db.delete(message)
+        await db.commit()
 
     return JSONResponse({"ok": True})
 
@@ -619,12 +731,6 @@ async def api_send_template_to_chat(
 
     return JSONResponse(
         {
-            "message": {
-                "id": message.id,
-                "sender_role": message.sender_role,
-                "text": message.text or "",
-                "attachment_data": message.attachment_data or [],
-                "created_at": message.created_at.isoformat(),
-            }
+            "message": _serialize_support_message(message)
         }
     )

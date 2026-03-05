@@ -32,6 +32,10 @@
   const wbFeedbackAiEnabledInput = document.getElementById("wb-feedback-ai-enabled");
   const wbFeedbackAiPromptInput = document.getElementById("wb-feedback-ai-prompt");
   const wbFeedbackAiStatus = document.getElementById("wb-feedback-ai-status");
+  const renameUserForm = document.getElementById("rename-user-form");
+  const renameUserInput = document.getElementById("rename-user-input");
+  const selectedUserName = document.getElementById("selected-user-name");
+  const archiveUserBtn = document.getElementById("archive-user-btn");
 
   let lastId = Number(chatBox?.dataset.lastId || 0);
   let templates = [...initialTemplates];
@@ -78,22 +82,48 @@
     });
   }
 
+  function isImageAttachment(att) {
+    if (!att || !att.url) {
+      return false;
+    }
+    const type = String(att.type || "").toLowerCase();
+    const contentType = String(att.content_type || "").toLowerCase();
+    const filename = String(att.filename || "").toLowerCase();
+    if (type === "image" || contentType.startsWith("image/")) {
+      return true;
+    }
+    return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif"]
+      .some((ext) => filename.endsWith(ext));
+  }
+
   function renderAttachments(attachments) {
     if (!Array.isArray(attachments) || attachments.length === 0) {
       return "";
     }
 
     const items = attachments.map((att) => {
+      if (isImageAttachment(att)) {
+        const name = att.filename ? `<div class="attachment-meta">${escapeHtml(att.filename)}</div>` : "";
+        return `
+          <li class="attachment-item">
+            <a href="${escapeHtml(att.url)}" class="attachment-image-link" target="_blank" rel="noopener">
+              <img src="${escapeHtml(att.url)}" alt="${escapeHtml(att.filename || "Изображение")}" class="attachment-image" loading="lazy" />
+            </a>
+            ${name}
+          </li>
+        `;
+      }
+
       if (att && att.url) {
-        return `<li><a href="${escapeHtml(att.url)}" target="_blank" rel="noopener">Вложение</a></li>`;
+        return `<li class="attachment-item"><a href="${escapeHtml(att.url)}" target="_blank" rel="noopener">Открыть вложение</a></li>`;
       }
 
       if (att && att.filename) {
         const size = att.size ? ` (${escapeHtml(att.size)} байт)` : "";
-        return `<li>${escapeHtml(att.filename)}${size}</li>`;
+        return `<li class="attachment-item">${escapeHtml(att.filename)}${size}</li>`;
       }
 
-      return "<li>Вложение</li>";
+      return '<li class="attachment-item">Вложение</li>';
     });
 
     return `<ul class="attachment-list">${items.join("")}</ul>`;
@@ -118,10 +148,21 @@
     const article = document.createElement("article");
     article.className = `message ${role === "admin" ? "message-admin" : (role === "bot" ? "message-bot" : "message-user")}`;
     article.dataset.messageId = String(message.id);
+    article.dataset.maxMessageId = String(message.max_message_id || "");
     article.innerHTML = `
       <div class="message-head">
         <span>${label}</span>
-        <time datetime="${escapeHtml(message.created_at)}">${escapeHtml(formatDate(message.created_at))}</time>
+        <div class="message-head-actions">
+          <time datetime="${escapeHtml(message.created_at)}">${escapeHtml(formatDate(message.created_at))}</time>
+          <button
+            type="button"
+            class="secondary message-delete-btn"
+            data-message-id="${escapeHtml(message.id)}"
+            ${message.max_message_id ? "" : "disabled"}
+          >
+            Удалить у всех
+          </button>
+        </div>
       </div>
       <p>${escapeHtml(message.text || "")}</p>
       ${renderAttachments(message.attachment_data)}
@@ -134,6 +175,62 @@
     if (shouldAutoScroll) {
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+  }
+
+  async function deleteMessageForAll(messageId) {
+    const response = await fetch(`/admin/api/messages/${messageId}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || "Не удалось удалить сообщение");
+    }
+  }
+
+  async function renameUser(event) {
+    event.preventDefault();
+    if (!sessionId || !renameUserInput) {
+      return;
+    }
+
+    const displayName = renameUserInput.value.trim();
+    const response = await fetch(`/admin/api/chats/${sessionId}/user`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ display_name: displayName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(payload.detail || "Не удалось переименовать пользователя");
+      return;
+    }
+    if (selectedUserName && payload.user && payload.user.display_name) {
+      selectedUserName.textContent = String(payload.user.display_name);
+    }
+    window.location.reload();
+  }
+
+  async function toggleArchiveUser() {
+    if (!sessionId || !archiveUserBtn) {
+      return;
+    }
+    const currentArchived = archiveUserBtn.dataset.archived === "true";
+    const nextArchived = !currentArchived;
+    const response = await fetch(`/admin/api/chats/${sessionId}/archive`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ is_archived: nextArchived }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      alert(payload.detail || "Не удалось изменить архивный статус");
+      return;
+    }
+    window.location.reload();
   }
 
   async function loadMessages() {
@@ -379,6 +476,63 @@
 
   if (sessionId) {
     setInterval(loadMessages, 3000);
+  }
+
+  if (chatBox) {
+    chatBox.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (!target.classList.contains("message-delete-btn")) {
+        return;
+      }
+      const messageId = target.dataset.messageId;
+      if (!messageId) {
+        return;
+      }
+      if (!confirm("Удалить сообщение у всех?")) {
+        return;
+      }
+
+      target.setAttribute("disabled", "disabled");
+      try {
+        await deleteMessageForAll(messageId);
+        const messageNode = target.closest(".message");
+        if (messageNode) {
+          messageNode.remove();
+        }
+      } catch (err) {
+        target.removeAttribute("disabled");
+        alert(err instanceof Error ? err.message : "Не удалось удалить сообщение");
+      }
+    });
+  }
+
+  if (renameUserForm) {
+    renameUserForm.addEventListener("submit", async (event) => {
+      try {
+        await renameUser(event);
+      } catch (err) {
+        alert("Не удалось переименовать пользователя");
+      }
+    });
+  }
+
+  if (archiveUserBtn) {
+    archiveUserBtn.addEventListener("click", async () => {
+      const action = archiveUserBtn.dataset.archived === "true"
+        ? "разархивировать"
+        : "архивировать";
+      if (!confirm(`Подтвердите: ${action} пользователя?`)) {
+        return;
+      }
+      try {
+        await toggleArchiveUser();
+      } catch (err) {
+        alert("Не удалось изменить архивный статус");
+      }
+    });
   }
 
   if (templateForm) {

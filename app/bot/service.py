@@ -194,21 +194,25 @@ class MaxBotService:
         if not clean_text and not attachments_for_send:
             raise ValueError("Нельзя отправить пустое сообщение")
 
-        await self.bot.send_message(
+        sent_message = await self.bot.send_message(
             chat_id=chat_id,
             user_id=user_id,
             text=clean_text or None,
             attachments=attachments_for_send or None,
         )
 
+        sent_attachment_data = self._serialize_sent_message_attachments(sent_message)
+        message_id = self._extract_sent_message_id(sent_message)
+
         await self._log_support_message_by_user(
             max_user_id=user_id,
             chat_id=chat_id,
             sender_role="admin",
             text=clean_text or None,
-            attachment_data=attachment_data or None,
+            attachment_data=sent_attachment_data or attachment_data or None,
             is_read=True,
             support_session_id=support_session_id,
+            max_message_id=message_id,
         )
 
     def _on_polling_done(self, task: asyncio.Task[None]) -> None:
@@ -983,6 +987,7 @@ class MaxBotService:
                 attachment_data=self._serialize_attachments(message) or None,
                 is_read=False,
                 create_session_if_missing=True,
+                max_message_id=self._extract_message_id(message),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Не удалось записать входящее сообщение в лог", exc_info=exc)
@@ -993,14 +998,19 @@ class MaxBotService:
         text: str | None = None,
         attachments: list[Any] | None = None,
     ) -> None:
-        await message.answer(text=text, attachments=attachments)
+        sent_message = await message.answer(text=text, attachments=attachments)
+        sent_attachment_data = self._serialize_sent_message_attachments(sent_message)
         await self._log_support_message_from_message(
             message=message,
             sender_role="bot",
             text=(text or "").strip() or None,
-            attachment_data=self._serialize_outgoing_attachments(attachments),
+            attachment_data=(
+                sent_attachment_data
+                or self._serialize_outgoing_attachments(attachments)
+            ),
             is_read=True,
             create_session_if_missing=True,
+            max_message_id=self._extract_sent_message_id(sent_message),
         )
 
     async def _send_order_step_message(
@@ -1013,6 +1023,7 @@ class MaxBotService:
     ) -> None:
         await self._delete_order_step_message(context)
         sent_message = await message.answer(text=text, attachments=attachments)
+        sent_attachment_data = self._serialize_sent_message_attachments(sent_message)
         await context.update_data(
             order_step_message_id=self._extract_sent_message_id(sent_message)
         )
@@ -1020,9 +1031,13 @@ class MaxBotService:
             message=message,
             sender_role="bot",
             text=(text or "").strip() or None,
-            attachment_data=self._serialize_outgoing_attachments(attachments),
+            attachment_data=(
+                sent_attachment_data
+                or self._serialize_outgoing_attachments(attachments)
+            ),
             is_read=True,
             create_session_if_missing=True,
+            max_message_id=self._extract_sent_message_id(sent_message),
         )
 
     async def _delete_order_step_message(self, context: BaseContext) -> None:
@@ -1045,6 +1060,22 @@ class MaxBotService:
     @staticmethod
     def _extract_sent_message_id(sent_message: Any) -> str | None:
         message = getattr(sent_message, "message", None)
+        if message is None:
+            return None
+        return MaxBotService._extract_message_id(message)
+
+    def _serialize_sent_message_attachments(
+        self,
+        sent_message: Any,
+    ) -> list[dict[str, Any]] | None:
+        message = getattr(sent_message, "message", None)
+        if message is None:
+            return None
+        serialized = self._serialize_attachments(message)
+        return serialized or None
+
+    @staticmethod
+    def _extract_message_id(message: Message | Any) -> str | None:
         body = getattr(message, "body", None)
         message_id = getattr(body, "mid", None)
         if not message_id:
@@ -1062,19 +1093,24 @@ class MaxBotService:
         if not self.bot:
             return
 
-        await self.bot.send_message(
+        sent_message = await self.bot.send_message(
             chat_id=chat_id,
             user_id=user_id,
             text=text,
             attachments=attachments,
         )
+        sent_attachment_data = self._serialize_sent_message_attachments(sent_message)
         await self._log_support_message_by_user(
             max_user_id=user_id,
             chat_id=chat_id,
             sender_role="bot",
             text=(text or "").strip() or None,
-            attachment_data=self._serialize_outgoing_attachments(attachments),
+            attachment_data=(
+                sent_attachment_data
+                or self._serialize_outgoing_attachments(attachments)
+            ),
             is_read=True,
+            max_message_id=self._extract_sent_message_id(sent_message),
         )
 
     async def _log_support_message_from_message(
@@ -1086,6 +1122,7 @@ class MaxBotService:
         attachment_data: list[dict[str, Any]] | None,
         is_read: bool,
         create_session_if_missing: bool,
+        max_message_id: str | None = None,
     ) -> None:
         async with self._session_factory() as db:
             user = await self._upsert_user_from_message(db, message)
@@ -1106,6 +1143,7 @@ class MaxBotService:
                     session_id=support_session.id,
                     sender_role=sender_role,
                     text=text or "[Вложение]",
+                    max_message_id=max_message_id,
                     attachment_data=attachment_data,
                     is_read=is_read,
                 )
@@ -1122,6 +1160,7 @@ class MaxBotService:
         attachment_data: list[dict[str, Any]] | None,
         is_read: bool,
         support_session_id: int | None = None,
+        max_message_id: str | None = None,
     ) -> None:
         async with self._session_factory() as db:
             user = await self._find_user_by_max_id(db, max_user_id)
@@ -1150,6 +1189,7 @@ class MaxBotService:
                     session_id=support_session.id,
                     sender_role=sender_role,
                     text=text or "[Вложение]",
+                    max_message_id=max_message_id,
                     attachment_data=attachment_data,
                     is_read=is_read,
                 )

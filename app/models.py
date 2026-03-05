@@ -50,7 +50,9 @@ class User(TimestampMixin, Base):
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    admin_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_channel: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     orders: Mapped[list[Order]] = relationship(
         back_populates="user",
@@ -121,6 +123,7 @@ class SupportMessage(Base):
     )
     sender_role: Mapped[str] = mapped_column(String(20), nullable=False)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    max_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attachment_data: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB,
         nullable=True,

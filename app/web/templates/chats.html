@@ -23,17 +23,23 @@
 
   <main class="layout">
     <aside class="sidebar">
-      <h2>Диалоги</h2>
+      <div class="sidebar-head">
+        <h2>Диалоги</h2>
+        <div class="chat-filter-tabs">
+          <a href="/admin/chats" class="chat-filter-tab {% if not archived_view %}active{% endif %}">Активные</a>
+          <a href="/admin/chats?archived=1" class="chat-filter-tab {% if archived_view %}active{% endif %}">Архив</a>
+        </div>
+      </div>
       {% if sessions %}
         <nav class="session-list">
           {% for session in sessions %}
             {% set unread = unread_counts.get(session.id, 0) %}
             <a
-              href="/admin/chats?session_id={{ session.id }}"
+              href="/admin/chats?session_id={{ session.id }}{% if archived_view %}&archived=1{% endif %}"
               class="session-item {% if selected_session and selected_session.id == session.id %}active{% endif %}"
             >
               <div class="session-main">
-                <strong>#{{ session.id }} · {{ session.user.full_name or session.user.first_name }}</strong>
+                <strong>#{{ session.id }} · {{ session.user.admin_display_name or session.user.full_name or session.user.first_name }}</strong>
                 <span class="muted">@{{ session.user.username or 'без username' }}</span>
               </div>
               <div class="session-meta">
@@ -63,25 +69,45 @@
           <div>
             <h2>Чат #{{ selected_session.id }}</h2>
             <p class="muted">
-              Пользователь: {{ selected_session.user.full_name or selected_session.user.first_name }} ·
+              Пользователь: <span id="selected-user-name">{{ selected_session.user.admin_display_name or selected_session.user.full_name or selected_session.user.first_name }}</span> ·
               ID {{ selected_session.user.max_user_id }}
             </p>
           </div>
-          {% if selected_session.is_open %}
+          <div class="chat-header-actions">
+            <form id="rename-user-form" class="rename-user-form">
+              <input
+                id="rename-user-input"
+                type="text"
+                maxlength="255"
+                placeholder="Имя пользователя в админке"
+                value="{{ selected_session.user.admin_display_name or '' }}"
+              />
+              <button type="submit" class="secondary">Сохранить имя</button>
+            </form>
             <button
-              id="close-chat-btn"
-              class="danger"
+              id="archive-user-btn"
+              class="secondary"
+              data-archived="{{ 'true' if selected_session.user.is_archived else 'false' }}"
               data-session-id="{{ selected_session.id }}"
             >
-              Закрыть чат
+              {% if selected_session.user.is_archived %}Разархивировать{% else %}В архив{% endif %}
             </button>
-          {% endif %}
+            {% if selected_session.is_open %}
+              <button
+                id="close-chat-btn"
+                class="danger"
+                data-session-id="{{ selected_session.id }}"
+              >
+                Закрыть чат
+              </button>
+            {% endif %}
+          </div>
         </header>
 
         <div id="chat-messages" class="chat-messages" data-last-id="{{ messages[-1].id if messages else 0 }}">
           {% if messages %}
             {% for msg in messages %}
-              <article class="message {% if msg.sender_role == 'admin' %}message-admin{% elif msg.sender_role == 'bot' %}message-bot{% else %}message-user{% endif %}" data-message-id="{{ msg.id }}">
+              <article class="message {% if msg.sender_role == 'admin' %}message-admin{% elif msg.sender_role == 'bot' %}message-bot{% else %}message-user{% endif %}" data-message-id="{{ msg.id }}" data-max-message-id="{{ msg.max_message_id or '' }}">
                 <div class="message-head">
                   <span>
                     {% if msg.sender_role == 'admin' %}
@@ -92,15 +118,49 @@
                       Пользователь
                     {% endif %}
                   </span>
-                  <time datetime="{{ msg.created_at.isoformat() }}">{{ msg.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+                  <div class="message-head-actions">
+                    <time datetime="{{ msg.created_at.isoformat() }}">{{ msg.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+                    <button
+                      type="button"
+                      class="secondary message-delete-btn"
+                      data-message-id="{{ msg.id }}"
+                      {% if not msg.max_message_id %}disabled title="Для старых сообщений недоступно"{% endif %}
+                    >
+                      Удалить у всех
+                    </button>
+                  </div>
                 </div>
                 <p>{{ msg.text or '[пусто]' }}</p>
                 {% if msg.attachment_data %}
                   <ul class="attachment-list">
                     {% for att in msg.attachment_data %}
-                      <li>
-                        {% if att.url %}
-                          <a href="{{ att.url }}" target="_blank" rel="noopener">Вложение</a>
+                      {% set filename = (att.filename or '')|lower %}
+                      {% set content_type = (att.content_type or '')|lower %}
+                      {% set is_image = att.url and (
+                        att.type == 'image' or
+                        content_type.startswith('image/') or
+                        filename.endswith('.jpg') or
+                        filename.endswith('.jpeg') or
+                        filename.endswith('.png') or
+                        filename.endswith('.gif') or
+                        filename.endswith('.webp') or
+                        filename.endswith('.bmp') or
+                        filename.endswith('.heic') or
+                        filename.endswith('.heif')
+                      ) %}
+                      <li class="attachment-item">
+                        {% if is_image %}
+                          <a href="{{ att.url }}" class="attachment-image-link" target="_blank" rel="noopener">
+                            <img src="{{ att.url }}" alt="{{ att.filename or 'Изображение' }}" class="attachment-image" loading="lazy" />
+                          </a>
+                          {% if att.filename or att.size %}
+                            <div class="attachment-meta">
+                              {% if att.filename %}{{ att.filename }}{% endif %}
+                              {% if att.size %}{% if att.filename %} · {% endif %}{{ att.size }} байт{% endif %}
+                            </div>
+                          {% endif %}
+                        {% elif att.url %}
+                          <a href="{{ att.url }}" target="_blank" rel="noopener">Открыть вложение</a>
                         {% elif att.filename %}
                           {{ att.filename }}{% if att.size %} ({{ att.size }} байт){% endif %}
                         {% else %}
