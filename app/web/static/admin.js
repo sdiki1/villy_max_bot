@@ -36,6 +36,8 @@
   const renameUserInput = document.getElementById("rename-user-input");
   const selectedUserName = document.getElementById("selected-user-name");
   const archiveUserBtn = document.getElementById("archive-user-btn");
+  const scrollTopBtn = document.getElementById("scroll-top-btn");
+  const scrollBottomBtn = document.getElementById("scroll-bottom-btn");
 
   let lastId = Number(chatBox?.dataset.lastId || 0);
   let templates = [...initialTemplates];
@@ -248,6 +250,26 @@
     } catch (err) {
       console.error("poll error", err);
     }
+  }
+
+  function scrollChatToTop() {
+    if (!chatBox) {
+      return;
+    }
+    chatBox.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  function scrollChatToBottom() {
+    if (!chatBox) {
+      return;
+    }
+    chatBox.scrollTo({
+      top: chatBox.scrollHeight,
+      behavior: "smooth",
+    });
   }
 
   function renderTemplateList() {
@@ -532,6 +554,18 @@
       } catch (err) {
         alert("Не удалось изменить архивный статус");
       }
+    });
+  }
+
+  if (scrollTopBtn) {
+    scrollTopBtn.addEventListener("click", () => {
+      scrollChatToTop();
+    });
+  }
+
+  if (scrollBottomBtn) {
+    scrollBottomBtn.addEventListener("click", () => {
+      scrollChatToBottom();
     });
   }
 

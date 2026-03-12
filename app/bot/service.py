@@ -857,6 +857,9 @@ class MaxBotService:
         user.first_name = sender.first_name
         user.last_name = sender.last_name
         user.username = sender.username
+        # Return archived users to active when they send a new message.
+        if user.is_archived:
+            user.is_archived = False
         return user
 
     async def _upsert_user_from_started_event(

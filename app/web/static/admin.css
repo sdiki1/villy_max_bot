@@ -227,6 +227,12 @@ body {
   flex-wrap: wrap;
 }
 
+.chat-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .rename-user-form {
   display: flex;
   align-items: center;
@@ -541,6 +547,10 @@ button.danger {
   }
 
   .rename-user-form input {
+    width: 100%;
+  }
+
+  .chat-nav-actions {
     width: 100%;
   }
 
