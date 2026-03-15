@@ -101,10 +101,6 @@
                 Закрыть чат
               </button>
             {% endif %}
-            <div class="chat-nav-actions">
-              <button type="button" id="scroll-top-btn" class="secondary">В начало</button>
-              <button type="button" id="scroll-bottom-btn" class="secondary">В конец</button>
-            </div>
           </div>
         </header>
 
@@ -235,6 +231,10 @@
             <button type="submit">Отправить</button>
           </div>
         </form>
+        <div class="chat-bottom-actions">
+          <button type="button" id="scroll-top-btn" class="secondary">В начало диалога</button>
+          <button type="button" id="scroll-bottom-btn" class="secondary">В конец диалога</button>
+        </div>
       {% else %}
         <div class="empty-state">Выберите диалог слева.</div>
       {% endif %}

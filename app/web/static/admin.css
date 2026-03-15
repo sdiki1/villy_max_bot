@@ -227,12 +227,6 @@ body {
   flex-wrap: wrap;
 }
 
-.chat-nav-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .rename-user-form {
   display: flex;
   align-items: center;
@@ -440,6 +434,12 @@ body {
   gap: 8px;
 }
 
+.chat-bottom-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 textarea,
 input {
   width: 100%;
@@ -550,8 +550,13 @@ button.danger {
     width: 100%;
   }
 
-  .chat-nav-actions {
+  .chat-bottom-actions {
     width: 100%;
+    justify-content: stretch;
+  }
+
+  .chat-bottom-actions button {
+    flex: 1;
   }
 
   .send-form {

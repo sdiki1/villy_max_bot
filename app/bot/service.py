@@ -392,7 +392,6 @@ class MaxBotService:
                 await self._answer_and_log(
                     event.message,
                     "Напишите текст вопроса или отправьте вложение.",
-                    attachments=[support_keyboard()],
                 )
                 return
 
@@ -400,7 +399,6 @@ class MaxBotService:
             await self._answer_and_log(
                 event.message,
                 SUPPORT_ACK_TEXT,
-                attachments=[support_keyboard()],
             )
 
         @self.dp.message_created(FAQStates.selecting_question)
@@ -778,7 +776,6 @@ class MaxBotService:
                     await self._answer_and_log(
                         event.message,
                         "Напишите текст вопроса или отправьте вложение.",
-                        attachments=[support_keyboard()],
                     )
                     return
 
@@ -787,13 +784,24 @@ class MaxBotService:
                 await self._answer_and_log(
                     event.message,
                     SUPPORT_ACK_TEXT,
-                    attachments=[support_keyboard()],
                 )
                 return
 
             incoming_attachments = self._serialize_attachments(event.message)
             if text or incoming_attachments:
+                async with self._session_factory() as db:
+                    user = await self._upsert_user_from_message(db, event.message)
+                    if user:
+                        await self._get_or_create_open_session(db, user.id)
+                    await db.commit()
+                await context.set_state(SupportStates.active_chat)
                 await self._notify_admin_about_user_message(event.message)
+                await self._answer_and_log(
+                    event.message,
+                    SUPPORT_ACK_TEXT,
+                )
+                return
+
             await self._answer_and_log(
                 event.message,
                 UNKNOWN_MENU_TEXT,

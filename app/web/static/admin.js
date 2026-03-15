@@ -256,20 +256,14 @@
     if (!chatBox) {
       return;
     }
-    chatBox.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
+    chatBox.scrollTop = 0;
   }
 
   function scrollChatToBottom() {
     if (!chatBox) {
       return;
     }
-    chatBox.scrollTo({
-      top: chatBox.scrollHeight,
-      behavior: "smooth",
-    });
+    chatBox.scrollTop = chatBox.scrollHeight;
   }
 
   function renderTemplateList() {
