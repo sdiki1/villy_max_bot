@@ -263,7 +263,13 @@
     if (!chatBox) {
       return;
     }
-    chatBox.scrollTop = chatBox.scrollHeight;
+    const applyBottomScroll = () => {
+      const maxTop = Math.max(0, chatBox.scrollHeight - chatBox.clientHeight);
+      chatBox.scrollTop = maxTop;
+    };
+    applyBottomScroll();
+    requestAnimationFrame(applyBottomScroll);
+    setTimeout(applyBottomScroll, 60);
   }
 
   function renderTemplateList() {
