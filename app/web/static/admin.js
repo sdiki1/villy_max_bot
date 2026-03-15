@@ -257,6 +257,12 @@
       return;
     }
     chatBox.scrollTop = 0;
+    const firstNode = chatBox.querySelector(".message, p.muted");
+    if (firstNode instanceof HTMLElement) {
+      firstNode.scrollIntoView({ block: "start", behavior: "smooth" });
+    } else {
+      chatBox.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
   }
 
   function scrollChatToBottom() {
@@ -270,6 +276,15 @@
     applyBottomScroll();
     requestAnimationFrame(applyBottomScroll);
     setTimeout(applyBottomScroll, 60);
+    const messageNodes = chatBox.querySelectorAll(".message");
+    const lastNode = messageNodes.length
+      ? messageNodes[messageNodes.length - 1]
+      : chatBox.lastElementChild;
+    if (lastNode instanceof HTMLElement) {
+      lastNode.scrollIntoView({ block: "end", behavior: "smooth" });
+    } else {
+      chatBox.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
   }
 
   function renderTemplateList() {
