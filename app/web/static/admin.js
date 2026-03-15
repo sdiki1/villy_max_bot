@@ -1,6 +1,7 @@
 (function () {
   const MOSCOW_TIME_ZONE = "Europe/Moscow";
   const sessionId = window.__CHAT_SESSION_ID__;
+  const targetMessageId = Number(window.__TARGET_MESSAGE_ID__ || 0);
   const initialTemplates = Array.isArray(window.__MESSAGE_TEMPLATES__)
     ? window.__MESSAGE_TEMPLATES__
     : [];
@@ -41,6 +42,7 @@
 
   let lastId = Number(chatBox?.dataset.lastId || 0);
   let templates = [...initialTemplates];
+  let isTargetMessageFocused = false;
 
   if (!sessionId && !templateForm && !wbAutoReplyForm && !wbFeedbackAiForm) {
     return;
@@ -177,6 +179,34 @@
     if (shouldAutoScroll) {
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    if (!isTargetMessageFocused && Number(message.id) === targetMessageId) {
+      focusTargetMessage();
+    }
+  }
+
+  function focusTargetMessage(attemptsLeft = 10) {
+    if (!chatBox || !targetMessageId || isTargetMessageFocused) {
+      return;
+    }
+
+    const targetNode = chatBox.querySelector(`.message[data-message-id="${targetMessageId}"]`);
+    if (!(targetNode instanceof HTMLElement)) {
+      if (attemptsLeft > 0) {
+        setTimeout(() => focusTargetMessage(attemptsLeft - 1), 200);
+      }
+      return;
+    }
+
+    targetNode.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetNode.classList.remove("message-target-flash");
+    // Force reflow to reliably restart the animation.
+    void targetNode.offsetWidth;
+    targetNode.classList.add("message-target-flash");
+    isTargetMessageFocused = true;
+    setTimeout(() => {
+      targetNode.classList.remove("message-target-flash");
+    }, 1200);
   }
 
   async function deleteMessageForAll(messageId) {
@@ -247,6 +277,9 @@
       const payload = await response.json();
       const messages = payload.messages || [];
       messages.forEach(appendMessage);
+      if (!isTargetMessageFocused && targetMessageId) {
+        focusTargetMessage();
+      }
     } catch (err) {
       console.error("poll error", err);
     }
@@ -508,7 +541,11 @@
   refreshRenderedTimes();
 
   if (chatBox) {
-    chatBox.scrollTop = chatBox.scrollHeight;
+    if (targetMessageId) {
+      focusTargetMessage();
+    } else {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
   }
 
   if (sessionId) {

@@ -149,6 +149,7 @@ async def logout(request: Request) -> RedirectResponse:
 async def chats_page(
     request: Request,
     session_id: int | None = None,
+    message_id: int | None = None,
     archived: int = 0,
 ):
     if not is_admin_authenticated(request):
@@ -164,6 +165,14 @@ async def chats_page(
                 .order_by(SupportSession.is_open.desc(), SupportSession.created_at.desc())
             )
         ).all()
+        if session_id is not None and all(item.id != session_id for item in sessions):
+            target_session = await db.scalar(
+                select(SupportSession)
+                .options(selectinload(SupportSession.user))
+                .where(SupportSession.id == session_id)
+            )
+            if target_session is not None:
+                sessions = [target_session, *sessions]
 
         unread_rows = await db.execute(
             select(SupportMessage.session_id, func.count(SupportMessage.id))
@@ -226,6 +235,7 @@ async def chats_page(
             "unread_counts": unread_counts,
             "templates": message_templates,
             "archived_view": archived_view,
+            "target_message_id": message_id,
         },
     )
 

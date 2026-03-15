@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from maxapi import Bot, Dispatcher
@@ -1240,6 +1240,9 @@ class MaxBotService:
             product_parts.append(product_size)
         product_label = " | ".join(product_parts)
 
+        support_session_id, support_message_id = (
+            await self._resolve_support_link_target(message)
+        )
         await self._notify_admin_telegram(
             user_name=self._display_name_for_message(message),
             message_text=(
@@ -1247,13 +1250,20 @@ class MaxBotService:
                 f"Товар: {product_label}. "
                 f"Пожелания: {safe_notes}"
             ),
+            support_session_id=support_session_id,
+            support_message_id=support_message_id,
         )
 
     async def _notify_admin_about_user_message(self, message: Message) -> None:
         preview = self._message_preview_for_notification(message)
+        support_session_id, support_message_id = (
+            await self._resolve_support_link_target(message)
+        )
         await self._notify_admin_telegram(
             user_name=self._display_name_for_message(message),
             message_text=preview,
+            support_session_id=support_session_id,
+            support_message_id=support_message_id,
         )
 
     async def _notify_admin_telegram(
@@ -1261,6 +1271,8 @@ class MaxBotService:
         *,
         user_name: str,
         message_text: str,
+        support_session_id: int | None = None,
+        support_message_id: int | None = None,
     ) -> None:
         if not self._telegram_bot_token or not self._telegram_chat_id:
             return
@@ -1275,10 +1287,14 @@ class MaxBotService:
             f"Сообщение: {safe_message}",
         ]
 
-        if self._admin_url:
+        admin_link = self._build_admin_chat_link(
+            session_id=support_session_id,
+            message_id=support_message_id,
+        )
+        if admin_link:
             lines.append("")
             lines.append(
-                f"Прочитайте и дайте ответ вот здесь: {self._admin_url}"
+                f"Прочитайте и дайте ответ вот здесь: {admin_link}"
             )
 
         text = "\n".join(lines)
@@ -1319,6 +1335,72 @@ class MaxBotService:
     def _send_telegram_request(request: Request) -> None:
         with urlopen(request, timeout=10) as response:
             response.read()
+
+    async def _resolve_support_link_target(
+        self,
+        message: Message,
+    ) -> tuple[int | None, int | None]:
+        sender = message.sender
+        max_message_id = self._extract_message_id(message)
+        if sender is None:
+            return None, None
+
+        async with self._session_factory() as db:
+            user = await self._find_user_by_max_id(db, sender.user_id)
+            if user is None:
+                return None, None
+
+            support_message: SupportMessage | None = None
+            if max_message_id:
+                support_message = await db.scalar(
+                    select(SupportMessage)
+                    .join(
+                        SupportSession,
+                        SupportMessage.session_id == SupportSession.id,
+                    )
+                    .where(
+                        SupportSession.user_id == user.id,
+                        SupportMessage.max_message_id == max_message_id,
+                        SupportMessage.sender_role == "user",
+                    )
+                    .order_by(SupportMessage.id.desc())
+                    .limit(1)
+                )
+
+            if support_message is not None:
+                return support_message.session_id, support_message.id
+
+            session = await self._get_user_session(db, user.id)
+            return (session.id, None) if session else (None, None)
+
+    def _build_admin_chat_link(
+        self,
+        *,
+        session_id: int | None,
+        message_id: int | None,
+    ) -> str | None:
+        if not self._admin_url:
+            return None
+
+        if session_id is None and message_id is None:
+            return self._admin_url
+
+        parsed = urlsplit(self._admin_url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if session_id is not None:
+            query["session_id"] = str(session_id)
+        if message_id is not None:
+            query["message_id"] = str(message_id)
+
+        return urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(query),
+                parsed.fragment,
+            )
+        )
 
     def _message_preview_for_notification(self, message: Message) -> str:
         text = self._message_text(message)

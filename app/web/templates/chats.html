@@ -243,6 +243,7 @@
   <script>
     window.__CHAT_SESSION_ID__ = {{ selected_session.id if selected_session else 'null' }};
     window.__CHAT_IS_OPEN__ = {{ 'true' if selected_session and selected_session.is_open else 'false' }};
+    window.__TARGET_MESSAGE_ID__ = {{ target_message_id if target_message_id is not none else 'null' }};
     window.__MESSAGE_TEMPLATES__ = [
       {% for tpl in templates %}
         {
