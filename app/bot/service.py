@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 
 PHONE_RE = re.compile(r"^\+?[0-9\s()\-]{10,20}$")
 VCF_TEL_RE = re.compile(r"TEL[^:]*:([+0-9\s()\-]{10,})", re.IGNORECASE)
+SUPPORT_ACK_SENT_KEY = "support_ack_sent"
 
 
 class IncomingMessageLogMiddleware(BaseMiddleware):
@@ -389,17 +390,15 @@ class MaxBotService:
 
             incoming_attachments = self._serialize_attachments(event.message)
             if not text and not incoming_attachments:
-                await self._answer_and_log(
-                    event.message,
-                    "Напишите текст вопроса или отправьте вложение.",
-                )
+                if not await self._is_support_ack_sent(context):
+                    await self._answer_and_log(
+                        event.message,
+                        "Напишите текст вопроса или отправьте вложение.",
+                    )
                 return
 
             await self._notify_admin_about_user_message(event.message)
-            await self._answer_and_log(
-                event.message,
-                SUPPORT_ACK_TEXT,
-            )
+            await self._send_support_ack_once(event.message, context)
 
         @self.dp.message_created(FAQStates.selecting_question)
         async def on_faq_question(
@@ -773,18 +772,16 @@ class MaxBotService:
             if await self._has_open_support_session_for_message(event.message):
                 incoming_attachments = self._serialize_attachments(event.message)
                 if not text and not incoming_attachments:
-                    await self._answer_and_log(
-                        event.message,
-                        "Напишите текст вопроса или отправьте вложение.",
-                    )
+                    if not await self._is_support_ack_sent(context):
+                        await self._answer_and_log(
+                            event.message,
+                            "Напишите текст вопроса или отправьте вложение.",
+                        )
                     return
 
                 await context.set_state(SupportStates.active_chat)
                 await self._notify_admin_about_user_message(event.message)
-                await self._answer_and_log(
-                    event.message,
-                    SUPPORT_ACK_TEXT,
-                )
+                await self._send_support_ack_once(event.message, context)
                 return
 
             incoming_attachments = self._serialize_attachments(event.message)
@@ -796,10 +793,7 @@ class MaxBotService:
                     await db.commit()
                 await context.set_state(SupportStates.active_chat)
                 await self._notify_admin_about_user_message(event.message)
-                await self._answer_and_log(
-                    event.message,
-                    SUPPORT_ACK_TEXT,
-                )
+                await self._send_support_ack_once(event.message, context)
                 return
 
             await self._answer_and_log(
@@ -1067,6 +1061,23 @@ class MaxBotService:
                 )
 
         await context.update_data(order_step_message_id=None)
+
+    async def _is_support_ack_sent(self, context: BaseContext) -> bool:
+        data = dict(await context.get_data())
+        return bool(data.get(SUPPORT_ACK_SENT_KEY))
+
+    async def _send_support_ack_once(
+        self,
+        message: Message,
+        context: BaseContext,
+    ) -> None:
+        if await self._is_support_ack_sent(context):
+            return
+        await self._answer_and_log(
+            message,
+            SUPPORT_ACK_TEXT,
+        )
+        await context.update_data(**{SUPPORT_ACK_SENT_KEY: True})
 
     @staticmethod
     def _extract_sent_message_id(sent_message: Any) -> str | None:
