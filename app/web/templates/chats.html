@@ -178,6 +178,16 @@
           {% endif %}
         </div>
 
+        {% if not selected_session.is_open %}
+          <p class="muted">Чат закрыт, но вы можете продолжать писать пользователю из админ-панели.</p>
+        {% endif %}
+        <form id="send-form" class="send-form" data-session-id="{{ selected_session.id }}">
+          <textarea id="message-input" rows="3" placeholder="Введите сообщение пользователю..."></textarea>
+          <div class="send-actions">
+            <input id="file-input" type="file" />
+            <button type="submit">Отправить</button>
+          </div>
+        </form>
         <section class="template-panel">
           <div class="template-panel-head">
             <h3>Макеты сообщений</h3>
@@ -221,17 +231,6 @@
             <button id="template-save-btn" type="submit">Сохранить шаблон</button>
           </form>
         </section>
-
-        {% if not selected_session.is_open %}
-          <p class="muted">Чат закрыт, но вы можете продолжать писать пользователю из админ-панели.</p>
-        {% endif %}
-        <form id="send-form" class="send-form" data-session-id="{{ selected_session.id }}">
-          <textarea id="message-input" rows="3" placeholder="Введите сообщение пользователю..."></textarea>
-          <div class="send-actions">
-            <input id="file-input" type="file" />
-            <button type="submit">Отправить</button>
-          </div>
-        </form>
         <div class="chat-bottom-actions">
           <button type="button" id="scroll-top-btn" class="secondary">В начало диалога</button>
         </div>
