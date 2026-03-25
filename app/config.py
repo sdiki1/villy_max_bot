@@ -34,6 +34,10 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    max_notify_chat_id: str = Field(
+        default="-72352444311745",
+        alias="MAX_NOTIFY_CHAT_ID",
+    )
     admin_url: str = Field(
         default="http://localhost:8001/admin/chats",
         alias="ADMIN_URL",

@@ -108,6 +108,7 @@ class MaxBotService:
         welcome_image_path: str | None = None,
         telegram_bot_token: str | None = None,
         telegram_chat_id: str | None = None,
+        max_notify_chat_id: str | None = None,
         admin_url: str | None = None,
     ) -> None:
         self._token = token
@@ -115,6 +116,7 @@ class MaxBotService:
         self._skip_updates = skip_updates
         self._telegram_bot_token = (telegram_bot_token or "").strip()
         self._telegram_chat_id = (telegram_chat_id or "").strip()
+        self._max_notify_chat_id = self._parse_chat_id(max_notify_chat_id)
         self._admin_url = (admin_url or "").strip()
         if welcome_image_path:
             self._welcome_image_path = Path(welcome_image_path).expanduser()
@@ -1290,7 +1292,7 @@ class MaxBotService:
         support_session_id, support_message_id = (
             await self._resolve_support_link_target(message)
         )
-        await self._notify_admin_telegram(
+        await self._notify_admin_channels(
             user_name=self._display_name_for_message(message),
             message_text=(
                 f"Заполнена заявка {order_label}. "
@@ -1306,14 +1308,14 @@ class MaxBotService:
         support_session_id, support_message_id = (
             await self._resolve_support_link_target(message)
         )
-        await self._notify_admin_telegram(
+        await self._notify_admin_channels(
             user_name=self._display_name_for_message(message),
             message_text=preview,
             support_session_id=support_session_id,
             support_message_id=support_message_id,
         )
 
-    async def _notify_admin_telegram(
+    async def _notify_admin_channels(
         self,
         *,
         user_name: str,
@@ -1321,9 +1323,23 @@ class MaxBotService:
         support_session_id: int | None = None,
         support_message_id: int | None = None,
     ) -> None:
-        if not self._telegram_bot_token or not self._telegram_chat_id:
-            return
+        text = self._build_admin_notification_text(
+            user_name=user_name,
+            message_text=message_text,
+            support_session_id=support_session_id,
+            support_message_id=support_message_id,
+        )
+        await self._notify_admin_telegram(text)
+        await self._notify_admin_max_chat(text)
 
+    def _build_admin_notification_text(
+        self,
+        *,
+        user_name: str,
+        message_text: str,
+        support_session_id: int | None = None,
+        support_message_id: int | None = None,
+    ) -> str:
         safe_message = (message_text or "").strip() or "[пустое сообщение]"
         if len(safe_message) > 800:
             safe_message = f"{safe_message[:797]}..."
@@ -1344,7 +1360,12 @@ class MaxBotService:
                 f"Прочитайте и дайте ответ вот здесь: {admin_link}"
             )
 
-        text = "\n".join(lines)
+        return "\n".join(lines)
+
+    async def _notify_admin_telegram(self, text: str) -> None:
+        if not self._telegram_bot_token or not self._telegram_chat_id:
+            return
+
         api_url = (
             f"https://api.telegram.org/bot{self._telegram_bot_token}/sendMessage"
         )
@@ -1375,6 +1396,22 @@ class MaxBotService:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Ошибка при отправке Telegram-уведомления: %s",
+                exc,
+            )
+
+    async def _notify_admin_max_chat(self, text: str) -> None:
+        if not self.bot or self._max_notify_chat_id is None:
+            return
+
+        try:
+            await self.bot.send_message(
+                chat_id=self._max_notify_chat_id,
+                text=text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Не удалось отправить уведомление в MAX-чат %s: %s",
+                self._max_notify_chat_id,
                 exc,
             )
 
@@ -1495,6 +1532,18 @@ class MaxBotService:
     def _is_start_command(text: str) -> bool:
         normalized = (text or "").strip().lower()
         return normalized == "/start" or normalized.startswith("/start ")
+
+    @staticmethod
+    def _parse_chat_id(raw_chat_id: str | None) -> int | None:
+        value = (raw_chat_id or "").strip()
+        if not value:
+            return None
+
+        try:
+            return int(value)
+        except ValueError:
+            logger.warning("Некорректный MAX chat id для уведомлений: %s", value)
+            return None
 
     def _extract_phone(self, message: Message) -> str | None:
         text = self._message_text(message)
