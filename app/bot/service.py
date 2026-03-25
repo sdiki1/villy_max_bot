@@ -90,7 +90,11 @@ class IncomingMessageLogMiddleware(BaseMiddleware):
         data,
     ):
         if isinstance(event_object, MessageCreated):
-            await self.service._log_incoming_user_message(event_object.message)
+            message = event_object.message
+            await self.service._log_incoming_user_message(message)
+            if await self.service._should_suppress_user_reply(message):
+                await self.service._notify_admin_about_user_message(message)
+                return None
         return await handler(event_object, data)
 
 
@@ -244,10 +248,27 @@ class MaxBotService:
             await context.clear()
 
             async with self._session_factory() as db:
-                await self._upsert_user_from_message(db, event.message)
+                user = await self._upsert_user_from_message(db, event.message)
+                if user:
+                    user.is_chat_mode = False
                 await db.commit()
 
             await self._send_welcome(message=event.message)
+
+        @self.dp.message_created(Command("getchatid"))
+        async def on_get_chat_id(event: MessageCreated) -> None:
+            chat_id = getattr(event.message.recipient, "chat_id", None)
+            if chat_id is None:
+                await self._answer_and_log(
+                    event.message,
+                    "Не удалось определить ID чата.",
+                )
+                return
+
+            await self._answer_and_log(
+                event.message,
+                f"ID этого чата: {chat_id}",
+            )
 
         @self.dp.message_created(F.message.body.text == BTN_ORDER)
         async def on_make_order(
@@ -979,6 +1000,25 @@ class MaxBotService:
             await db.commit()
             return session is not None
 
+    async def _should_suppress_user_reply(self, message: Message) -> bool:
+        sender = message.sender
+        if sender is None or sender.is_bot:
+            return False
+
+        if self._is_start_command(self._message_text(message)):
+            return False
+
+        return await self._is_chat_mode_enabled_for_message(message)
+
+    async def _is_chat_mode_enabled_for_message(self, message: Message) -> bool:
+        sender = message.sender
+        if sender is None or sender.is_bot:
+            return False
+
+        async with self._session_factory() as db:
+            user = await self._find_user_by_max_id(db, sender.user_id)
+            return bool(user and user.is_chat_mode)
+
     async def _log_incoming_user_message(self, message: Message) -> None:
         sender = message.sender
         if sender is None or sender.is_bot:
@@ -1185,6 +1225,7 @@ class MaxBotService:
         max_message_id: str | None = None,
     ) -> None:
         async with self._session_factory() as db:
+            is_admin_message = sender_role == "admin"
             user = await self._find_user_by_max_id(db, max_user_id)
             if user is None:
                 user = User(
@@ -1205,6 +1246,12 @@ class MaxBotService:
 
             if support_session is None:
                 support_session = await self._get_or_create_user_session(db, user.id)
+
+            if is_admin_message:
+                user.is_chat_mode = True
+                if not support_session.is_open:
+                    support_session.is_open = True
+                    support_session.closed_at = None
 
             db.add(
                 SupportMessage(
@@ -1443,6 +1490,11 @@ class MaxBotService:
         if not message.body or not message.body.text:
             return ""
         return message.body.text.strip()
+
+    @staticmethod
+    def _is_start_command(text: str) -> bool:
+        normalized = (text or "").strip().lower()
+        return normalized == "/start" or normalized.startswith("/start ")
 
     def _extract_phone(self, message: Message) -> str | None:
         text = self._message_text(message)

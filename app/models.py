@@ -53,6 +53,7 @@ class User(TimestampMixin, Base):
     admin_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_channel: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_chat_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     orders: Mapped[list[Order]] = relationship(
         back_populates="user",

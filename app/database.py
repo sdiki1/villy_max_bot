@@ -177,6 +177,14 @@ async def _ensure_user_schema(conn) -> None:
             """
         )
     )
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS is_chat_mode BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
 
 
 async def _ensure_support_message_schema(conn) -> None:
