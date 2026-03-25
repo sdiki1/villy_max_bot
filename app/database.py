@@ -23,6 +23,9 @@ engine: AsyncEngine = create_async_engine(
     settings.database_url,
     pool_pre_ping=True,
 )
+IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
+INIT_DB_LOCK_KEY_1 = 24031991
+INIT_DB_LOCK_KEY_2 = 17042024
 
 SessionFactory = async_sessionmaker(
     bind=engine,
@@ -35,6 +38,8 @@ async def init_db() -> None:
     from app import models  # noqa: F401
 
     async with engine.begin() as conn:
+        if IS_POSTGRES:
+            await _acquire_init_db_lock(conn)
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_single_support_session_per_user(conn)
         await _ensure_user_schema(conn)
@@ -43,7 +48,24 @@ async def init_db() -> None:
         await _ensure_wb_auto_reply_schema(conn)
 
 
+async def _acquire_init_db_lock(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            SELECT pg_advisory_xact_lock(:lock_key_1, :lock_key_2)
+            """
+        ),
+        {
+            "lock_key_1": INIT_DB_LOCK_KEY_1,
+            "lock_key_2": INIT_DB_LOCK_KEY_2,
+        },
+    )
+
+
 async def _ensure_single_support_session_per_user(conn) -> None:
+    if await _support_session_unique_index_exists(conn):
+        return
+
     # Bring old data to "1 chat (session) = 1 client" shape.
     await conn.execute(
         text(
@@ -112,6 +134,17 @@ async def _ensure_single_support_session_per_user(conn) -> None:
             """
         )
     )
+
+
+async def _support_session_unique_index_exists(conn) -> bool:
+    result = await conn.scalar(
+        text(
+            """
+            SELECT to_regclass('public.uq_support_sessions_user_id') IS NOT NULL
+            """
+        )
+    )
+    return bool(result)
 
 
 async def _ensure_wb_auto_reply_schema(conn) -> None:
