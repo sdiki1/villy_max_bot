@@ -157,12 +157,28 @@ async def chats_page(
 
     archived_view = bool(archived)
     async with SessionFactory() as db:
+        last_message_subquery = (
+            select(
+                SupportMessage.session_id.label("session_id"),
+                func.max(SupportMessage.id).label("last_message_id"),
+            )
+            .group_by(SupportMessage.session_id)
+            .subquery()
+        )
         sessions = (
             await db.scalars(
                 select(SupportSession)
                 .options(selectinload(SupportSession.user))
+                .outerjoin(
+                    last_message_subquery,
+                    last_message_subquery.c.session_id == SupportSession.id,
+                )
                 .where(SupportSession.user.has(User.is_archived.is_(archived_view)))
-                .order_by(SupportSession.is_open.desc(), SupportSession.created_at.desc())
+                .order_by(
+                    func.coalesce(last_message_subquery.c.last_message_id, 0).desc(),
+                    SupportSession.created_at.desc(),
+                    SupportSession.id.desc(),
+                )
             )
         ).all()
         if session_id is not None and all(item.id != session_id for item in sessions):
