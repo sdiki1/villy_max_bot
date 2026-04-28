@@ -12,6 +12,10 @@ class WbApiError(RuntimeError):
 
 
 class WbFeedbacksClient:
+    _MAX_QUESTIONS_WINDOW = 10_000
+    _MAX_FEEDBACKS_TAKE = 5_000
+    _MAX_FEEDBACKS_SKIP = 199_990
+
     def __init__(
         self,
         *,
@@ -27,6 +31,7 @@ class WbFeedbacksClient:
             timeout=timeout,
             headers={
                 "Authorization": clean_token,
+                "Accept": "application/json",
                 "Content-Type": "application/json",
             },
         )
@@ -67,16 +72,29 @@ class WbFeedbacksClient:
         take: int,
         skip: int,
         order: str = "dateAsc",
+        nm_id: int | None = None,
+        date_from: int | None = None,
+        date_to: int | None = None,
     ) -> list[dict[str, Any]]:
+        clean_take = max(0, min(take, self._MAX_QUESTIONS_WINDOW))
+        clean_skip = max(0, min(skip, self._MAX_QUESTIONS_WINDOW))
+        if clean_take + clean_skip > self._MAX_QUESTIONS_WINDOW:
+            clean_take = max(0, self._MAX_QUESTIONS_WINDOW - clean_skip)
+
+        params = self._build_list_params(
+            is_answered=is_answered,
+            take=clean_take,
+            skip=clean_skip,
+            order=order,
+            nm_id=nm_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
         payload = await self._request_json(
             "GET",
             "/api/v1/questions",
-            params={
-                "isAnswered": "true" if is_answered else "false",
-                "take": str(take),
-                "skip": str(skip),
-                "order": order,
-            },
+            params=params,
         )
 
         data = payload.get("data")
@@ -96,16 +114,30 @@ class WbFeedbacksClient:
         take: int,
         skip: int,
         order: str = "dateAsc",
+        nm_id: int | None = None,
+        date_from: int | None = None,
+        date_to: int | None = None,
+        order_status: str | None = None,
     ) -> list[dict[str, Any]]:
+        clean_take = max(0, min(take, self._MAX_FEEDBACKS_TAKE))
+        clean_skip = max(0, min(skip, self._MAX_FEEDBACKS_SKIP))
+
+        params = self._build_list_params(
+            is_answered=is_answered,
+            take=clean_take,
+            skip=clean_skip,
+            order=order,
+            nm_id=nm_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        if order_status:
+            params["orderStatus"] = order_status
+
         payload = await self._request_json(
             "GET",
             "/api/v1/feedbacks",
-            params={
-                "isAnswered": "true" if is_answered else "false",
-                "take": str(take),
-                "skip": str(skip),
-                "order": order,
-            },
+            params=params,
         )
 
         data = payload.get("data")
@@ -118,25 +150,62 @@ class WbFeedbacksClient:
 
         return [item for item in feedbacks if isinstance(item, dict)]
 
-    async def answer_question(self, *, question_id: str, answer_text: str) -> None:
+    async def get_question(self, *, question_id: str) -> dict[str, Any]:
         clean_question_id = question_id.strip()
-        clean_answer_text = answer_text.strip()
         if not clean_question_id:
             raise ValueError("Question ID is required")
-        if not clean_answer_text:
-            raise ValueError("Answer text is required")
+
+        payload = await self._request_json(
+            "GET",
+            "/api/v1/question",
+            params={"id": clean_question_id},
+        )
+        data = payload.get("data")
+        return data if isinstance(data, dict) else {}
+
+    async def mark_question_viewed(self, *, question_id: str) -> None:
+        clean_question_id = question_id.strip()
+        if not clean_question_id:
+            raise ValueError("Question ID is required")
 
         await self._request_json(
             "PATCH",
             "/api/v1/questions",
             json={
                 "id": clean_question_id,
-                "answer": {
-                    "text": clean_answer_text,
-                },
-                "state": "wbRu",
+                "wasViewed": True,
             },
         )
+
+    async def answer_question(self, *, question_id: str, answer_text: str) -> None:
+        clean_question_id = question_id.strip()
+        clean_answer_text = answer_text.strip()
+        if not clean_question_id:
+            raise ValueError("Question ID is required")
+        if len(clean_answer_text) < 2:
+            raise ValueError("Answer text should contain at least 2 characters")
+
+        await self._request_json(
+            "PATCH",
+            "/api/v1/questions",
+            json={
+                "id": clean_question_id,
+                "text": clean_answer_text,
+            },
+        )
+
+    async def get_feedback(self, *, feedback_id: str) -> dict[str, Any]:
+        clean_feedback_id = feedback_id.strip()
+        if not clean_feedback_id:
+            raise ValueError("Feedback ID is required")
+
+        payload = await self._request_json(
+            "GET",
+            "/api/v1/feedback",
+            params={"id": clean_feedback_id},
+        )
+        data = payload.get("data")
+        return data if isinstance(data, dict) else {}
 
     async def answer_feedback(self, *, feedback_id: str, answer_text: str) -> None:
         clean_feedback_id = feedback_id.strip()
@@ -150,6 +219,25 @@ class WbFeedbacksClient:
 
         await self._request_json(
             "POST",
+            "/api/v1/feedbacks/answer",
+            json={
+                "id": clean_feedback_id,
+                "text": clean_answer_text,
+            },
+        )
+
+    async def edit_feedback_answer(self, *, feedback_id: str, answer_text: str) -> None:
+        clean_feedback_id = feedback_id.strip()
+        clean_answer_text = answer_text.strip()
+        if not clean_feedback_id:
+            raise ValueError("Feedback ID is required")
+        if len(clean_answer_text) < 2:
+            raise ValueError("Answer text should contain at least 2 characters")
+        if len(clean_answer_text) > 5000:
+            clean_answer_text = clean_answer_text[:5000].strip()
+
+        await self._request_json(
+            "PATCH",
             "/api/v1/feedbacks/answer",
             json={
                 "id": clean_feedback_id,
@@ -190,10 +278,41 @@ class WbFeedbacksClient:
             raise WbApiError("WB API returned invalid JSON") from exc
 
         if payload.get("error"):
-            detail = str(payload.get("errorText") or "Unknown WB API error")
+            detail_parts = [str(payload.get("errorText") or "").strip()]
+            additional_errors = payload.get("additionalErrors")
+            if isinstance(additional_errors, list):
+                detail_parts.extend(
+                    str(item).strip() for item in additional_errors if str(item).strip()
+                )
+            detail = "; ".join(part for part in detail_parts if part) or "Unknown WB API error"
             raise WbApiError(detail, status_code=response.status_code)
 
         return payload
+
+    @staticmethod
+    def _build_list_params(
+        *,
+        is_answered: bool,
+        take: int,
+        skip: int,
+        order: str,
+        nm_id: int | None,
+        date_from: int | None,
+        date_to: int | None,
+    ) -> dict[str, str]:
+        params = {
+            "isAnswered": "true" if is_answered else "false",
+            "take": str(take),
+            "skip": str(skip),
+            "order": order,
+        }
+        if nm_id is not None:
+            params["nmId"] = str(nm_id)
+        if date_from is not None:
+            params["dateFrom"] = str(date_from)
+        if date_to is not None:
+            params["dateTo"] = str(date_to)
+        return params
 
     @staticmethod
     def _extract_error_text(response: httpx.Response) -> str:
@@ -206,6 +325,8 @@ class WbFeedbacksClient:
                     return str(payload["detail"])
                 if payload.get("title"):
                     return str(payload["title"])
+                if payload.get("message"):
+                    return str(payload["message"])
         except ValueError:
             pass
 

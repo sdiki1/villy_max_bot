@@ -129,8 +129,7 @@ class WbAutoReplyWorker:
             if not question_id:
                 continue
 
-            question_answer = question.get("answer")
-            if isinstance(question_answer, dict) and question_answer.get("text"):
+            if self._extract_answer_text(question.get("answer")):
                 continue
 
             reply_text = self._render_question_template(template=template, question=question)
@@ -190,8 +189,7 @@ class WbAutoReplyWorker:
             if not feedback_id:
                 continue
 
-            existing_answer = feedback.get("answer")
-            if isinstance(existing_answer, dict) and str(existing_answer.get("text") or "").strip():
+            if self._extract_answer_text(feedback.get("answer")):
                 continue
 
             user_prompt = self._build_feedback_user_prompt(feedback)
@@ -359,12 +357,14 @@ class WbAutoReplyWorker:
             f"ID отзыва: {val('id') or '-'}",
             f"Имя покупателя: {val('userName') or '-'}",
             f"Оценка: {val('productValuation') or '-'}",
+            f"Статус заказа: {val('orderStatus') or '-'}",
             f"Текст отзыва: {val('text') or '-'}",
             f"Плюсы: {val('pros') or '-'}",
             f"Минусы: {val('cons') or '-'}",
             f"Товар: {val('productName', source=product) or '-'}",
             f"Бренд: {val('brandName', source=product) or '-'}",
             f"Артикул WB (nmId): {val('nmId', source=product) or '-'}",
+            f"Артикул продавца: {val('supplierArticle', source=product) or '-'}",
         ]
 
         return "\n".join(lines).strip()
@@ -382,6 +382,14 @@ class WbAutoReplyWorker:
             text = text[:5000].strip()
 
         return text
+
+    @staticmethod
+    def _extract_answer_text(answer: Any) -> str:
+        if isinstance(answer, dict):
+            return str(answer.get("text") or "").strip()
+        if isinstance(answer, str):
+            return answer.strip()
+        return ""
 
 
 async def _run_worker() -> None:
