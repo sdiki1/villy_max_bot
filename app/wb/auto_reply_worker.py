@@ -27,6 +27,7 @@ _MAX_QUESTIONS_PER_SCAN = 10_000
 _MAX_FEEDBACKS_PER_SCAN = 5_000
 _PAGE_SIZE = 200
 _REQUEST_INTERVAL_SECONDS = 0.36
+_BASE_TOKEN_REQUEST_INTERVAL_SECONDS = 720.0
 _DEFAULT_FEEDBACK_AI_PROMPT = (
     "Ты менеджер поддержки магазина VillyPrint на Wildberries.\n"
     "Сформируй короткий, вежливый и естественный ответ на отзыв покупателя.\n"
@@ -49,10 +50,14 @@ class WbAutoReplyWorker:
         gemini_model: str,
         gemini_temperature: float,
         poll_interval_seconds: int,
-        wb_api_min_interval_seconds: float = _REQUEST_INTERVAL_SECONDS,
+        wb_api_min_interval_seconds: float | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._poll_interval_seconds = max(5, poll_interval_seconds)
+        self._wb_api_min_interval_seconds = self._resolve_wb_min_interval_seconds(
+            poll_interval_seconds=self._poll_interval_seconds,
+            configured_min_interval_seconds=wb_api_min_interval_seconds,
+        )
         self._warned_about_missing_wb_token = False
         self._warned_about_missing_gemini = False
         self._wb_client: WbFeedbacksClient | None = None
@@ -62,7 +67,7 @@ class WbAutoReplyWorker:
         if clean_wb_token:
             self._wb_client = WbFeedbacksClient(
                 api_token=clean_wb_token,
-                min_interval_seconds=wb_api_min_interval_seconds,
+                min_interval_seconds=self._wb_api_min_interval_seconds,
             )
 
         clean_gemini_key = gemini_api_key.strip()
@@ -81,8 +86,9 @@ class WbAutoReplyWorker:
 
     async def run_forever(self) -> None:
         logger.info(
-            "WB auto-reply worker started. Poll interval: %s sec",
+            "WB auto-reply worker started. Poll interval: %s sec. WB API min interval: %.2f sec",
             self._poll_interval_seconds,
+            self._wb_api_min_interval_seconds,
         )
         while True:
             try:
@@ -301,6 +307,20 @@ class WbAutoReplyWorker:
             exc,
         )
         await asyncio.sleep(wait_seconds)
+
+    @staticmethod
+    def _resolve_wb_min_interval_seconds(
+        *,
+        poll_interval_seconds: int,
+        configured_min_interval_seconds: float | None,
+    ) -> float:
+        if configured_min_interval_seconds is not None:
+            return max(0.0, configured_min_interval_seconds)
+
+        if poll_interval_seconds >= _BASE_TOKEN_REQUEST_INTERVAL_SECONDS:
+            return _BASE_TOKEN_REQUEST_INTERVAL_SECONDS
+
+        return _REQUEST_INTERVAL_SECONDS
 
     async def _load_or_create_settings(self) -> WbAutoReplySetting:
         async with self._session_factory() as db:
