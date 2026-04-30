@@ -1,31 +1,47 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import httpx
 
 
 class WbApiError(RuntimeError):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        retry_after: float | None = None,
+        reset_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+        self.reset_after = reset_after
 
 
 class WbFeedbacksClient:
     _MAX_QUESTIONS_WINDOW = 10_000
     _MAX_FEEDBACKS_TAKE = 5_000
     _MAX_FEEDBACKS_SKIP = 199_990
+    _DEFAULT_MIN_INTERVAL_SECONDS = 0.36
 
     def __init__(
         self,
         *,
         api_token: str,
         timeout: float = 20.0,
+        min_interval_seconds: float = _DEFAULT_MIN_INTERVAL_SECONDS,
     ) -> None:
         clean_token = api_token.strip()
         if not clean_token:
             raise ValueError("WB API token is required")
 
+        self._min_interval_seconds = max(0.0, min_interval_seconds)
+        self._rate_limit_lock = asyncio.Lock()
+        self._next_request_at = 0.0
         self._client = httpx.AsyncClient(
             base_url="https://feedbacks-api.wildberries.ru",
             timeout=timeout,
@@ -253,18 +269,27 @@ class WbFeedbacksClient:
         params: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        await self._wait_for_request_slot()
+
         response = await self._client.request(
             method,
             path,
             params=params,
             json=json,
         )
+        self._remember_rate_limit_headers(response)
 
         if response.status_code >= 400:
             detail = self._extract_error_text(response)
+            retry_after = self._extract_header_seconds(response, "X-Ratelimit-Retry")
+            if retry_after is None:
+                retry_after = self._extract_header_seconds(response, "Retry-After")
+            reset_after = self._extract_header_seconds(response, "X-Ratelimit-Reset")
             raise WbApiError(
                 f"WB API request failed [{response.status_code}]: {detail}",
                 status_code=response.status_code,
+                retry_after=retry_after,
+                reset_after=reset_after,
             )
 
         if response.status_code == 204 or not response.text.strip():
@@ -288,6 +313,29 @@ class WbFeedbacksClient:
             raise WbApiError(detail, status_code=response.status_code)
 
         return payload
+
+    async def _wait_for_request_slot(self) -> None:
+        async with self._rate_limit_lock:
+            now = time.monotonic()
+            wait_seconds = self._next_request_at - now
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+
+            self._next_request_at = time.monotonic() + self._min_interval_seconds
+
+    def _remember_rate_limit_headers(self, response: httpx.Response) -> None:
+        remaining = self._extract_header_int(response, "X-Ratelimit-Remaining")
+        if remaining is None or remaining > 0:
+            return
+
+        reset_after = self._extract_header_seconds(response, "X-Ratelimit-Reset")
+        if reset_after is None or reset_after <= 0:
+            return
+
+        self._next_request_at = max(
+            self._next_request_at,
+            time.monotonic() + reset_after,
+        )
 
     @staticmethod
     def _build_list_params(
@@ -332,3 +380,27 @@ class WbFeedbacksClient:
 
         text = response.text.strip()
         return text or "Unknown HTTP error"
+
+    @staticmethod
+    def _extract_header_int(response: httpx.Response, name: str) -> int | None:
+        value = response.headers.get(name)
+        if value is None:
+            return None
+
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _extract_header_seconds(response: httpx.Response, name: str) -> float | None:
+        value = response.headers.get(name)
+        if value is None:
+            return None
+
+        try:
+            seconds = float(value)
+        except ValueError:
+            return None
+
+        return max(0.0, seconds)

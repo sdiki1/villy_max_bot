@@ -49,6 +49,7 @@ class WbAutoReplyWorker:
         gemini_model: str,
         gemini_temperature: float,
         poll_interval_seconds: int,
+        wb_api_min_interval_seconds: float = _REQUEST_INTERVAL_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._poll_interval_seconds = max(5, poll_interval_seconds)
@@ -59,7 +60,10 @@ class WbAutoReplyWorker:
 
         clean_wb_token = api_token.strip()
         if clean_wb_token:
-            self._wb_client = WbFeedbacksClient(api_token=clean_wb_token)
+            self._wb_client = WbFeedbacksClient(
+                api_token=clean_wb_token,
+                min_interval_seconds=wb_api_min_interval_seconds,
+            )
 
         clean_gemini_key = gemini_api_key.strip()
         if clean_gemini_key:
@@ -98,8 +102,14 @@ class WbAutoReplyWorker:
                 self._warned_about_missing_wb_token = True
             return
 
-        await self._run_questions_cycle(cfg)
-        await self._run_feedback_ai_cycle(cfg)
+        try:
+            await self._run_questions_cycle(cfg)
+            await self._run_feedback_ai_cycle(cfg)
+        except WbApiError as exc:
+            if exc.status_code == 429:
+                await self._sleep_after_wb_rate_limit(exc)
+                return
+            raise
 
     async def _run_questions_cycle(self, cfg: WbAutoReplySetting) -> None:
         template = (cfg.answer_template or "").strip()
@@ -150,7 +160,8 @@ class WbAutoReplyWorker:
                     exc,
                 )
                 if exc.status_code == 429:
-                    await asyncio.sleep(1.0)
+                    await self._sleep_after_wb_rate_limit(exc)
+                    break
             await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
 
         if answered or failed:
@@ -213,7 +224,8 @@ class WbAutoReplyWorker:
                     exc,
                 )
                 if isinstance(exc, WbApiError) and exc.status_code == 429:
-                    await asyncio.sleep(1.0)
+                    await self._sleep_after_wb_rate_limit(exc)
+                    break
             await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
 
         if answered or failed:
@@ -275,6 +287,20 @@ class WbAutoReplyWorker:
             await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
 
         return feedbacks
+
+    async def _sleep_after_wb_rate_limit(self, exc: WbApiError) -> None:
+        wait_seconds = exc.retry_after
+        if wait_seconds is None or wait_seconds <= 0:
+            wait_seconds = exc.reset_after
+        if wait_seconds is None or wait_seconds <= 0:
+            wait_seconds = max(float(self._poll_interval_seconds), 60.0)
+
+        logger.warning(
+            "WB API rate limit reached. Sleeping %.1f sec before next WB request: %s",
+            wait_seconds,
+            exc,
+        )
+        await asyncio.sleep(wait_seconds)
 
     async def _load_or_create_settings(self) -> WbAutoReplySetting:
         async with self._session_factory() as db:
@@ -403,6 +429,7 @@ async def _run_worker() -> None:
         gemini_model=settings.gemini_model,
         gemini_temperature=settings.gemini_temperature,
         poll_interval_seconds=settings.wb_auto_reply_poll_interval,
+        wb_api_min_interval_seconds=settings.wb_api_min_interval_seconds,
     )
 
     try:

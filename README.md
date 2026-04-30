@@ -72,6 +72,11 @@ cp .env.example .env
 - `WB_API_TOKEN` (токен категории «Вопросы и отзывы» для автоответов WB)
 - `GEMINI_API_KEY` (ключ Gemini для AI-ответов на отзывы)
 
+Для WB лучше использовать Personal или Service token категории «Вопросы и отзывы».
+С 30.03.2026 у Base/Basic token для этой категории лимит сильно ниже: 5 запросов
+в час с интервалом 12 минут. Если используете такой токен, задайте
+`WB_API_MIN_INTERVAL_SECONDS=720` и `WB_AUTO_REPLY_POLL_INTERVAL=720` или больше.
+
 3. Запустите:
 
 ```bash
@@ -90,6 +95,7 @@ docker compose up --build -d
 - `DATABASE_URL` — строка подключения к Postgres
 - `WB_API_TOKEN` — API-токен Wildberries (категория «Вопросы и отзывы»)
 - `WB_AUTO_REPLY_POLL_INTERVAL` — частота опроса WB API (секунды)
+- `WB_API_MIN_INTERVAL_SECONDS` — минимальная пауза между запросами к WB API (по умолчанию `0.36`; для Base/Basic token используйте `720`)
 - `GEMINI_API_KEY` — ключ Google Gemini API
 - `GEMINI_MODEL` — модель Gemini (по умолчанию `gemini-2.0-flash`)
 - `GEMINI_TEMPERATURE` — температура генерации ответа

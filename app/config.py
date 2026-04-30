@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         default=30,
         alias="WB_AUTO_REPLY_POLL_INTERVAL",
     )
+    wb_api_min_interval_seconds: float = Field(
+        default=0.36,
+        alias="WB_API_MIN_INTERVAL_SECONDS",
+    )
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
     gemini_temperature: float = Field(default=0.4, alias="GEMINI_TEMPERATURE")
