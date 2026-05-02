@@ -92,6 +92,7 @@ docker compose up --build -d
 
 - `MAX_BOT_TOKEN` — токен MAX-бота
 - `MAX_SKIP_UPDATES` — пропускать старые апдейты при старте
+- `MAX_DELETE_ORDER_STEP_MESSAGES` — удалять предыдущие сообщения-подсказки при оформлении заказа (по умолчанию `false`)
 - `WELCOME_IMAGE_PATH` — путь к приветственной картинке внутри контейнера (по умолчанию `welcome.jpeg`)
 - `DATABASE_URL` — строка подключения к Postgres
 - `WB_API_TOKEN` — API-токен Wildberries (категория «Вопросы и отзывы»)

@@ -91,6 +91,8 @@ class IncomingMessageLogMiddleware(BaseMiddleware):
     ):
         if isinstance(event_object, MessageCreated):
             message = event_object.message
+            if self.service._should_ignore_message_event(message):
+                return None
             await self.service._log_incoming_user_message(message)
             if await self.service._should_suppress_user_reply(message):
                 await self.service._notify_admin_about_user_message(message)
@@ -105,6 +107,7 @@ class MaxBotService:
         token: str,
         session_factory: async_sessionmaker[AsyncSession],
         skip_updates: bool = True,
+        delete_order_step_messages: bool = False,
         welcome_image_path: str | None = None,
         telegram_bot_token: str | None = None,
         telegram_chat_id: str | None = None,
@@ -114,6 +117,7 @@ class MaxBotService:
         self._token = token
         self._session_factory = session_factory
         self._skip_updates = skip_updates
+        self._delete_order_step_messages = delete_order_step_messages
         self._telegram_bot_token = (telegram_bot_token or "").strip()
         self._telegram_chat_id = (telegram_chat_id or "").strip()
         self._max_notify_chat_id = self._parse_chat_id(max_notify_chat_id)
@@ -227,6 +231,18 @@ class MaxBotService:
             exc = task.exception()
             if exc:
                 logger.exception("Polling завершился с ошибкой", exc_info=exc)
+
+    def _should_ignore_message_event(self, message: Message) -> bool:
+        sender = message.sender
+        if sender is not None and sender.is_bot:
+            return True
+
+        recipient = getattr(message, "recipient", None)
+        chat_id = getattr(recipient, "chat_id", None)
+        return (
+            self._max_notify_chat_id is not None
+            and chat_id == self._max_notify_chat_id
+        )
 
     def _register_handlers(self) -> None:
         @self.dp.bot_started()
@@ -1093,6 +1109,11 @@ class MaxBotService:
         if not message_id:
             return
 
+        await context.update_data(order_step_message_id=None)
+
+        if not self._delete_order_step_messages:
+            return
+
         if self.bot:
             try:
                 await self.bot.delete_message(message_id=message_id)
@@ -1101,8 +1122,6 @@ class MaxBotService:
                     "Не удалось удалить предыдущее step-сообщение: %s",
                     exc,
                 )
-
-        await context.update_data(order_step_message_id=None)
 
     async def _is_support_ack_sent(self, context: BaseContext) -> bool:
         data = dict(await context.get_data())

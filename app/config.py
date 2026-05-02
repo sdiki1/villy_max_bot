@@ -15,6 +15,10 @@ class Settings(BaseSettings):
 
     max_bot_token: str = Field(default="", alias="MAX_BOT_TOKEN")
     max_skip_updates: bool = Field(default=True, alias="MAX_SKIP_UPDATES")
+    max_delete_order_step_messages: bool = Field(
+        default=False,
+        alias="MAX_DELETE_ORDER_STEP_MESSAGES",
+    )
     welcome_image_path: str | None = Field(
         default=None,
         alias="WELCOME_IMAGE_PATH",
